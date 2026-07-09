@@ -1,0 +1,79 @@
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import type { CartItem, Customer, ProductSize } from "@/types";
+
+interface CartState {
+  items: CartItem[];
+  addItem: (item: Omit<CartItem, "quantity"> & { quantity?: number }) => void;
+  updateQuantity: (productId: string, size: ProductSize, quantity: number) => void;
+  removeItem: (productId: string, size: ProductSize) => void;
+  clear: () => void;
+  totalItems: () => number;
+}
+
+export const useCartStore = create<CartState>()(
+  persist(
+    (set, get) => ({
+      items: [],
+      addItem: (item) => {
+        const qty = item.quantity || 1;
+        const existing = get().items.find(
+          (i) => i.product_id === item.product_id && i.size === item.size
+        );
+        if (existing) {
+          set({
+            items: get().items.map((i) =>
+              i.product_id === item.product_id && i.size === item.size
+                ? { ...i, quantity: i.quantity + qty }
+                : i
+            ),
+          });
+        } else {
+          set({ items: [...get().items, { ...item, quantity: qty }] });
+        }
+      },
+      updateQuantity: (productId, size, quantity) => {
+        if (quantity <= 0) {
+          set({
+            items: get().items.filter(
+              (i) => !(i.product_id === productId && i.size === size)
+            ),
+          });
+        } else {
+          set({
+            items: get().items.map((i) =>
+              i.product_id === productId && i.size === size
+                ? { ...i, quantity }
+                : i
+            ),
+          });
+        }
+      },
+      removeItem: (productId, size) => {
+        set({
+          items: get().items.filter(
+            (i) => !(i.product_id === productId && i.size === size)
+          ),
+        });
+      },
+      clear: () => set({ items: [] }),
+      totalItems: () => get().items.reduce((s, i) => s + i.quantity, 0),
+    }),
+    { name: "catalog-cart" }
+  )
+);
+
+interface CustomerState {
+  customer: Customer | null;
+  setCustomer: (customer: Customer | null) => void;
+}
+
+export const useCustomerStore = create<CustomerState>()(
+  persist(
+    (set) => ({
+      customer: null,
+      setCustomer: (customer) => set({ customer }),
+    }),
+    { name: "catalog-customer" }
+  )
+);
