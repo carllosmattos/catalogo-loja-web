@@ -13,7 +13,7 @@ export function SetupBanner() {
   } else if (!status.hasKey) {
     hint = "NEXT_PUBLIC_SUPABASE_ANON_KEY não encontrada.";
   } else if (!status.urlValid) {
-    hint = "URL inválida — use https:// (sem hhttps).";
+    hint = `URL inválida: ${status.urlDiagnostic}. Use exatamente: https://ktvlhviikifcxbibxsas.supabase.co`;
   } else if (!status.keyLooksValid) {
     hint = `Chave anon inválida (${status.keyLength} caracteres). Copie a chave completa eyJ... em Supabase → Settings → API → anon public.`;
   }

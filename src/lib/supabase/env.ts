@@ -2,6 +2,8 @@
 
 function cleanEnv(value: string | undefined): string {
   let v = (value || "").trim();
+  // Remove BOM / caracteres invisíveis no início
+  v = v.replace(/^\uFEFF/, "");
   if (
     (v.startsWith('"') && v.endsWith('"')) ||
     (v.startsWith("'") && v.endsWith("'"))
@@ -11,9 +13,20 @@ function cleanEnv(value: string | undefined): string {
   return v;
 }
 
+/** Corrige typos comuns na URL do Supabase. */
+export function normalizeSupabaseUrl(raw: string): string {
+  let v = cleanEnv(raw);
+  if (v.startsWith("hhttps://")) v = v.slice(1);
+  if (v.startsWith("http://")) v = `https://${v.slice("http://".length)}`;
+  if (!v.startsWith("https://") && v.includes(".supabase.co")) {
+    v = `https://${v.replace(/^\/+/, "")}`;
+  }
+  return v.replace(/\/$/, "");
+}
+
 export function resolveSupabaseUrl(): string {
-  return cleanEnv(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+  return normalizeSupabaseUrl(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || ""
   );
 }
 
@@ -28,10 +41,28 @@ export function isValidAnonKey(key: string): boolean {
   return key.startsWith("eyJ") && key.length > 100;
 }
 
+export function isValidSupabaseUrl(url: string): boolean {
+  return /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url);
+}
+
 export function isSupabaseConfigured(): boolean {
   const url = resolveSupabaseUrl();
   const key = resolveSupabaseAnonKey();
-  return url.startsWith("https://") && isValidAnonKey(key);
+  return isValidSupabaseUrl(url) && isValidAnonKey(key);
+}
+
+export function getUrlDiagnostic(raw: string): string {
+  const cleaned = cleanEnv(raw);
+  if (!cleaned) return "vazia";
+  if (cleaned.startsWith("hhttps://")) return "typo hhttps:// — remova o h extra";
+  if (cleaned.startsWith("http://")) return "use https:// (não http://)";
+  if (!cleaned.startsWith("https://") && cleaned.includes(".supabase.co")) {
+    return "falta https:// no início";
+  }
+  if (!cleaned.includes(".supabase.co")) return "não parece URL do Supabase";
+  if (cleaned.endsWith("/")) return "remova a barra / no final";
+  if (!/^https:\/\//.test(cleaned)) return `prefixo inválido: "${cleaned.slice(0, 10)}..."`;
+  return "ok";
 }
 
 export function getSupabaseConfigStatus(): {
@@ -39,16 +70,22 @@ export function getSupabaseConfigStatus(): {
   hasUrl: boolean;
   hasKey: boolean;
   urlValid: boolean;
+  urlLength: number;
+  urlDiagnostic: string;
   keyLength: number;
   keyLooksValid: boolean;
 } {
+  const rawUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
   const url = resolveSupabaseUrl();
   const key = resolveSupabaseAnonKey();
   return {
-    configured: url.startsWith("https://") && isValidAnonKey(key),
-    hasUrl: url.length > 0,
+    configured: isValidSupabaseUrl(url) && isValidAnonKey(key),
+    hasUrl: rawUrl.trim().length > 0,
     hasKey: key.length > 0,
-    urlValid: url.startsWith("https://"),
+    urlValid: isValidSupabaseUrl(url),
+    urlLength: url.length,
+    urlDiagnostic: getUrlDiagnostic(rawUrl),
     keyLength: key.length,
     keyLooksValid: isValidAnonKey(key),
   };
@@ -57,8 +94,10 @@ export function getSupabaseConfigStatus(): {
 export function getSupabasePublicEnv(): { url: string; anonKey: string } {
   const url = resolveSupabaseUrl();
   const anonKey = resolveSupabaseAnonKey();
-  if (!url.startsWith("https://")) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL inválida.");
+  if (!isValidSupabaseUrl(url)) {
+    throw new Error(
+      `NEXT_PUBLIC_SUPABASE_URL inválida (${getUrlDiagnostic(process.env.NEXT_PUBLIC_SUPABASE_URL || "")}). Use: https://SEU-REF.supabase.co`
+    );
   }
   if (!isValidAnonKey(anonKey)) {
     throw new Error(
