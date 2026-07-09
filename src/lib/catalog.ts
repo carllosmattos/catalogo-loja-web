@@ -11,19 +11,38 @@ import type {
 import { DEFAULT_SETTINGS, mergeBrandSettings } from "@/lib/branding";
 import { mergeSizes } from "@/lib/sizes";
 import { createClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+
+async function getClient() {
+  if (!isSupabaseConfigured()) return null;
+  return createClient();
+}
 
 export async function fetchStoreSettings(): Promise<StoreSettings> {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("store_settings")
-    .select("*")
-    .limit(1)
-    .single();
-  return mergeBrandSettings(data || DEFAULT_SETTINGS);
+  if (!isSupabaseConfigured()) {
+    return mergeBrandSettings(DEFAULT_SETTINGS);
+  }
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("store_settings")
+      .select("*")
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error("fetchStoreSettings:", error.message);
+      return mergeBrandSettings(DEFAULT_SETTINGS);
+    }
+    return mergeBrandSettings(data || DEFAULT_SETTINGS);
+  } catch (e) {
+    console.error("fetchStoreSettings:", e);
+    return mergeBrandSettings(DEFAULT_SETTINGS);
+  }
 }
 
 export async function fetchCategories(): Promise<Category[]> {
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return [];
   const { data } = await supabase
     .from("categories")
     .select("*")
@@ -37,7 +56,8 @@ export async function fetchProductsPage(params: {
   page?: number;
   perPage?: number;
 }): Promise<{ products: Product[]; total: number }> {
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return { products: [], total: 0 };
   const page = Math.max(1, params.page || 1);
   const perPage = Math.max(1, params.perPage || 20);
   const start = (page - 1) * perPage;
@@ -59,13 +79,14 @@ export async function fetchProductsPage(params: {
 }
 
 export async function fetchProduct(id: string): Promise<Product | null> {
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return null;
   const { data } = await supabase
     .from("products")
     .select("*")
     .eq("id", id)
     .eq("active", true)
-    .single();
+    .maybeSingle();
   if (!data) return null;
   const [product] = await attachSizes([data]);
   return product;
@@ -73,7 +94,8 @@ export async function fetchProduct(id: string): Promise<Product | null> {
 
 async function attachSizes(products: Product[]): Promise<Product[]> {
   if (!products.length) return [];
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return products.map((p) => ({ ...p, sizes: mergeSizes(null) }));
   const ids = products.map((p) => p.id);
   const { data: rows } = await supabase
     .from("product_sizes")
@@ -96,7 +118,8 @@ async function attachSizes(products: Product[]): Promise<Product[]> {
 }
 
 export async function fetchActivePromotions(): Promise<Promotion[]> {
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return [];
   const now = new Date().toISOString();
   const { data } = await supabase
     .from("promotions")
@@ -108,7 +131,8 @@ export async function fetchActivePromotions(): Promise<Promotion[]> {
 }
 
 export async function fetchStoreBanners(): Promise<StoreBanner[]> {
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return [];
   const { data } = await supabase
     .from("store_banners")
     .select("*")
@@ -118,7 +142,8 @@ export async function fetchStoreBanners(): Promise<StoreBanner[]> {
 }
 
 export async function fetchProductGifts(productId: string) {
-  const supabase = await createClient();
+  const supabase = await getClient();
+  if (!supabase) return [];
   const { data } = await supabase
     .from("product_gifts")
     .select("*, gifts(*)")
