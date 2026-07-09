@@ -5,6 +5,8 @@ import { fetchStoreSettings } from "@/lib/catalog";
 import { themeCssVars } from "@/lib/branding";
 import "./globals.css";
 
+export const dynamic = "force-dynamic";
+
 const geist = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
