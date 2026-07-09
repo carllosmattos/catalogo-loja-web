@@ -21,6 +21,9 @@ export function normalizeSupabaseUrl(raw: string): string {
   if (!v.startsWith("https://") && v.includes(".supabase.co")) {
     v = `https://${v.replace(/^\/+/, "")}`;
   }
+  // Remove /rest/v1, /auth/v1 etc. — Project URL é só o domínio base
+  const baseMatch = v.match(/^(https:\/\/[a-z0-9-]+\.supabase\.co)/i);
+  if (baseMatch) v = baseMatch[1];
   return v.replace(/\/$/, "");
 }
 
@@ -60,6 +63,12 @@ export function getUrlDiagnostic(raw: string): string {
     return "falta https:// no início";
   }
   if (!cleaned.includes(".supabase.co")) return "não parece URL do Supabase";
+  if (/\/rest\/v1|\/auth\/v1/i.test(cleaned)) {
+    return "remova /rest/v1 — use só https://SEU-REF.supabase.co";
+  }
+  if (cleaned.match(/\.supabase\.co\/.+/)) {
+    return "remova o caminho após .supabase.co";
+  }
   if (cleaned.endsWith("/")) return "remova a barra / no final";
   if (!/^https:\/\//.test(cleaned)) return `prefixo inválido: "${cleaned.slice(0, 10)}..."`;
   return "ok";
