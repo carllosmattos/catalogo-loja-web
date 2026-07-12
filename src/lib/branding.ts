@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   primary_color: "#8B0A50",
   secondary_color: "#D4AF37",
   accent_color: "#FFF5F8",
-  logo_url: null,
+  logo_url: "/logo-lm.png",
   default_banner_url: null,
 };
 
@@ -25,6 +25,9 @@ export function mergeBrandSettings(
     if (!(settings || {})[key]) {
       merged[key] = DEFAULT_SETTINGS[key];
     }
+  }
+  if (!merged.logo_url) {
+    merged.logo_url = DEFAULT_SETTINGS.logo_url;
   }
   return merged;
 }

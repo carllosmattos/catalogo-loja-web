@@ -19,25 +19,22 @@ const NAV = [
   { href: "/conta", label: "Conta", icon: User },
 ];
 
+const DEFAULT_LOGO = "/logo-lm.png";
+
 export function StoreHeader({ storeName, logoUrl }: StoreHeaderProps) {
   const totalItems = useCartStore((s) => s.totalItems());
   const pathname = usePathname();
+  const logo = logoUrl || DEFAULT_LOGO;
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-primary)]/10 bg-white/95 backdrop-blur-md">
       <div className={cn(STORE_CONTAINER, "flex h-14 items-center justify-between md:h-16")}>
         <Link href="/" className="flex items-center gap-2 md:gap-3">
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt={storeName}
-              className="h-8 w-8 rounded-full object-cover md:h-10 md:w-10"
-            />
-          ) : (
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-bold text-white md:h-10 md:w-10 md:text-sm">
-              {storeName.charAt(0)}
-            </span>
-          )}
+          <img
+            src={logo}
+            alt={storeName}
+            className="h-8 w-8 object-contain md:h-10 md:w-10"
+          />
           <span className="text-sm font-semibold text-[var(--color-primary)] line-clamp-1 md:text-base">
             {storeName}
           </span>

@@ -37,8 +37,18 @@ export function CartPageClient({ settings }: CartPageClientProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ customerId: customer.id, cart: items }),
     })
-      .then((r) => r.json())
-      .then(setShipping)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok || data?.error != null || typeof data?.amount !== "number") {
+          setShipping(null);
+          return;
+        }
+        setShipping({
+          amount: Number(data.amount) || 0,
+          label: String(data.label || ""),
+          blocked: Boolean(data.blocked),
+        });
+      })
       .catch(() => setShipping(null));
   }, [items, customer?.id]);
 

@@ -1,5 +1,7 @@
-export function formatCurrency(value: number): string {
-  return `R$ ${value.toFixed(2).replace(".", ",")}`;
+export function formatCurrency(value: number | null | undefined): string {
+  const n = Number(value);
+  const safe = Number.isFinite(n) ? n : 0;
+  return `R$ ${safe.toFixed(2).replace(".", ",")}`;
 }
 
 export function parseWhatsappNumber(raw: string): string {
