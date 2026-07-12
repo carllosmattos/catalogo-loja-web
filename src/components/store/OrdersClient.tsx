@@ -6,16 +6,9 @@ import { StoreHeader } from "@/components/store/StoreHeader";
 import { useCustomerStore } from "@/stores";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
+import { orderStatusLabel } from "@/lib/order-status";
 import type { StoreSettings } from "@/types";
 import { STORE_MAIN } from "@/lib/store-layout";
-
-const STATUS_LABELS: Record<string, string> = {
-  pending_payment: "Aguardando PIX",
-  paid: "Pago",
-  cancelled: "Cancelado",
-  refund_requested: "Reembolso solicitado",
-  refunded: "Reembolsado",
-};
 
 interface OrderRow {
   id: string;
@@ -107,7 +100,7 @@ export function OrdersClient({ settings }: OrdersClientProps) {
                     Pedido #{order.id.slice(0, 8)}
                   </span>
                   <span className="text-xs text-gray-400">
-                    {STATUS_LABELS[order.status] || order.status}
+                    {orderStatusLabel(order.status)}
                   </span>
                 </div>
                 <p className="mt-1 text-sm font-semibold text-[var(--color-primary)]">

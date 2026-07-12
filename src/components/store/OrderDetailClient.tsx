@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { StoreHeader } from "@/components/store/StoreHeader";
 import { useCustomerStore } from "@/stores";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
+import { orderStatusLabel } from "@/lib/order-status";
 import { Copy, Check, RefreshCw } from "lucide-react";
 import type { StoreSettings } from "@/types";
 import { STORE_MAIN } from "@/lib/store-layout";
@@ -46,10 +48,13 @@ export function OrderDetailClient({
   token,
   initialOrder,
 }: OrderDetailClientProps) {
+  const router = useRouter();
   const customer = useCustomerStore((s) => s.customer);
   const [bundle, setBundle] = useState(() => normalizeBundle(initialOrder));
   const [copied, setCopied] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [busy, setBusy] = useState<"cancel" | "delete" | "refund" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function refresh() {
     const supabase = createClient();
@@ -77,9 +82,11 @@ export function OrderDetailClient({
   }
 
   async function cancelOrder() {
-    if (!bundle?.order?.id || !customer?.id) return;
+    if (!bundle?.order?.id || !customer?.id || busy) return;
+    setBusy("cancel");
+    setActionError(null);
     const payment = bundle.payment;
-    await fetch("/api/orders/cancel", {
+    const res = await fetch("/api/orders/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -88,12 +95,48 @@ export function OrderDetailClient({
         providerPaymentId: payment?.provider_payment_id,
       }),
     });
+    const data = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      setActionError(String(data.error || "Não foi possível cancelar."));
+      return;
+    }
     await refresh();
   }
 
+  async function deleteOrder() {
+    if (!bundle?.order?.id || !customer?.id || busy) return;
+    const ok = window.confirm(
+      "Excluir este pedido da sua lista? Essa ação não pode ser desfeita."
+    );
+    if (!ok) return;
+    setBusy("delete");
+    setActionError(null);
+    const payment = bundle.payment;
+    const res = await fetch("/api/orders/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId: bundle.order.id,
+        customerId: customer.id,
+        providerPaymentId: payment?.provider_payment_id,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      setActionError(String(data.error || "Não foi possível excluir."));
+      return;
+    }
+    router.push("/pedidos");
+    router.refresh();
+  }
+
   async function requestRefund() {
-    if (!bundle?.order?.id || !customer?.id) return;
-    await fetch("/api/orders/refund", {
+    if (!bundle?.order?.id || !customer?.id || busy) return;
+    setBusy("refund");
+    setActionError(null);
+    const res = await fetch("/api/orders/refund", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -102,10 +145,17 @@ export function OrderDetailClient({
         reason: "Solicitação do cliente",
       }),
     });
+    const data = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      setActionError(String(data.error || "Não foi possível solicitar reembolso."));
+      return;
+    }
     await refresh();
   }
 
   const status = String(bundle?.order?.status || "");
+  const paymentStatus = String(bundle?.payment?.status || "");
 
   useEffect(() => {
     if (status === "pending_payment") {
@@ -142,7 +192,14 @@ export function OrderDetailClient({
           <h1 className="mt-2 text-xl font-semibold text-[var(--color-primary)]">
             Pedido #{String(order.id).slice(0, 8)}
           </h1>
-          <p className="text-sm text-gray-500">Status: {status}</p>
+          <p className="text-sm text-gray-500">
+            Status: {orderStatusLabel(status)}
+          </p>
+          {paymentStatus && paymentStatus !== status && (
+            <p className="text-xs text-gray-400">
+              Pagamento: {orderStatusLabel(paymentStatus)}
+            </p>
+          )}
           <p className="mt-2 text-2xl font-bold text-[var(--color-primary)]">
             {formatCurrency(Number(order.total_amount))}
           </p>
@@ -194,23 +251,39 @@ export function OrderDetailClient({
             </ul>
           )}
 
+          {actionError && (
+            <p className="mt-4 text-sm text-red-600">{actionError}</p>
+          )}
+
           <div className="mt-6 flex flex-col gap-2">
             {status === "pending_payment" && customer && (
               <button
                 type="button"
                 onClick={cancelOrder}
-                className="rounded-full border border-red-300 py-2 text-sm text-red-600"
+                disabled={Boolean(busy)}
+                className="rounded-full border border-red-300 py-2 text-sm text-red-600 disabled:opacity-50"
               >
-                Cancelar pedido
+                {busy === "cancel" ? "Cancelando..." : "Cancelar pedido"}
               </button>
             )}
             {status === "paid" && customer && (
               <button
                 type="button"
                 onClick={requestRefund}
-                className="rounded-full border border-gray-300 py-2 text-sm text-gray-600"
+                disabled={Boolean(busy)}
+                className="rounded-full border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
               >
-                Solicitar reembolso
+                {busy === "refund" ? "Enviando..." : "Solicitar reembolso"}
+              </button>
+            )}
+            {customer && (
+              <button
+                type="button"
+                onClick={deleteOrder}
+                disabled={Boolean(busy)}
+                className="rounded-full border border-gray-300 py-2 text-sm text-gray-700 disabled:opacity-50"
+              >
+                {busy === "delete" ? "Excluindo..." : "Excluir da minha lista"}
               </button>
             )}
           </div>
