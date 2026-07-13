@@ -110,12 +110,20 @@ export interface CartItem {
   sale_freight: number;
 }
 
+export type ShippingMethod = "delivery" | "uber";
+
 export interface ShippingQuote {
   amount: number;
   zone_type: string;
   label: string;
   blocked: boolean;
   source: string;
+  /** Prazo em dias úteis (Melhor Envio), quando disponível */
+  delivery_days?: number | null;
+  /** Texto amigável do prazo, ex: "3 a 5 dias úteis" */
+  delivery_range?: string | null;
+  company?: string | null;
+  service?: string | null;
 }
 
 export type PaymentStatus =

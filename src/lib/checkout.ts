@@ -90,7 +90,8 @@ export async function buildLinesFromCart(
 
 export async function startPixCheckout(
   customer: Customer,
-  lines: Awaited<ReturnType<typeof buildLinesFromCart>>
+  lines: Awaited<ReturnType<typeof buildLinesFromCart>>,
+  shippingMethod: "delivery" | "uber" = "delivery"
 ) {
   if (!paymentsEnabled()) {
     throw new Error("Pagamentos online desativados.");
@@ -103,7 +104,8 @@ export async function startPixCheckout(
   const shipping = await calculateShipping(
     customer as unknown as Record<string, string>,
     lines,
-    settings as unknown as Record<string, unknown>
+    settings as unknown as Record<string, unknown>,
+    shippingMethod
   );
   if (shipping.blocked) {
     throw new Error(
@@ -177,6 +179,8 @@ export async function startPixCheckout(
     total,
     shipping_amount: shipping.amount,
     shipping_label: shipping.label,
+    shipping_method: shippingMethod,
+    delivery_range: shipping.delivery_range || null,
     expires_at: expiresAt || expiresIso,
     back_url: `${base}/pedidos/${trackingToken}`,
   };

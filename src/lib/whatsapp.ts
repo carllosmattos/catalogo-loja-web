@@ -53,7 +53,12 @@ export function buildCartMessage(
   }>,
   storeName: string,
   customer: Record<string, string> | null | undefined,
-  shippingAmount = 0
+  shippingAmount = 0,
+  shippingInfo?: {
+    method?: "delivery" | "uber";
+    label?: string;
+    deliveryRange?: string | null;
+  }
 ): string {
   const lines = ["Olá! Quero comprar:", "", ...customerLines(customer)];
   let grandTotal = 0;
@@ -71,9 +76,24 @@ export function buildCartMessage(
     }
     lines.push(`   Subtotal: ${formatCurrency(subtotal)}`, "");
   });
-  if (shippingAmount > 0) {
-    lines.push(`Frete: ${formatCurrency(shippingAmount)}`);
-    grandTotal += shippingAmount;
+  if (shippingInfo?.method === "uber") {
+    lines.push(
+      "Entrega: Uber (vou solicitar o Uber e combinar com a loja pelo WhatsApp)",
+      "Frete: a combinar (não incluso no site)",
+      ""
+    );
+  } else {
+    if (shippingInfo?.label) {
+      lines.push(`Entrega: ${shippingInfo.label}`);
+    }
+    if (shippingInfo?.deliveryRange) {
+      lines.push(`Prazo: ${shippingInfo.deliveryRange}`);
+    }
+    if (shippingAmount > 0) {
+      lines.push(`Frete: ${formatCurrency(shippingAmount)}`);
+      grandTotal += shippingAmount;
+    }
+    lines.push("");
   }
   lines.push(`TOTAL: ${formatCurrency(grandTotal)}`, "", `Vi no catálogo da ${storeName}`);
   return lines.join("\n");

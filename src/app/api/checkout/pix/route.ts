@@ -7,10 +7,12 @@ import type { Customer } from "@/types";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { customerId, cart } = body;
+    const { customerId, cart, shippingMethod } = body;
     if (!customerId || !cart?.length) {
       return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
     }
+
+    const method = shippingMethod === "uber" ? "uber" : "delivery";
 
     const supabase = await createClient();
     const { data: customer } = await supabase
@@ -34,7 +36,7 @@ export async function POST(request: Request) {
     ) as Record<string, NonNullable<Awaited<ReturnType<typeof fetchProduct>>>>;
 
     const lines = await buildLinesFromCart(cart, validProducts);
-    const result = await startPixCheckout(customer as Customer, lines);
+    const result = await startPixCheckout(customer as Customer, lines, method);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(

@@ -5,22 +5,28 @@ import { useEffect, useState } from "react";
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { StoreHeader } from "@/components/store/StoreHeader";
 import { useCartStore, useCustomerStore } from "@/stores";
-import { formatCurrency } from "@/lib/utils";
-import type { StoreSettings } from "@/types";
+import { formatCurrency, cn } from "@/lib/utils";
+import type { ShippingMethod, StoreSettings } from "@/types";
 import { STORE_MAIN } from "@/lib/store-layout";
 
 interface CartPageClientProps {
   settings: StoreSettings;
 }
 
+interface ShippingState {
+  amount: number;
+  label: string;
+  blocked: boolean;
+  delivery_range?: string | null;
+  source?: string;
+}
+
 export function CartPageClient({ settings }: CartPageClientProps) {
-  const { items, updateQuantity, removeItem } = useCartStore();
+  const { items, updateQuantity, removeItem, shippingMethod, setShippingMethod } =
+    useCartStore();
   const customer = useCustomerStore((s) => s.customer);
-  const [shipping, setShipping] = useState<{
-    amount: number;
-    label: string;
-    blocked: boolean;
-  } | null>(null);
+  const [shipping, setShipping] = useState<ShippingState | null>(null);
+  const [loadingShip, setLoadingShip] = useState(false);
 
   const subtotal = items.reduce(
     (s, i) => s + (Number(i.sale_price) + Number(i.sale_freight)) * i.quantity,
@@ -32,10 +38,15 @@ export function CartPageClient({ settings }: CartPageClientProps) {
       setShipping(null);
       return;
     }
+    setLoadingShip(true);
     fetch("/api/shipping/quote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customerId: customer.id, cart: items }),
+      body: JSON.stringify({
+        customerId: customer.id,
+        cart: items,
+        shippingMethod,
+      }),
     })
       .then(async (r) => {
         const data = await r.json();
@@ -47,12 +58,21 @@ export function CartPageClient({ settings }: CartPageClientProps) {
           amount: Number(data.amount) || 0,
           label: String(data.label || ""),
           blocked: Boolean(data.blocked),
+          delivery_range: data.delivery_range ? String(data.delivery_range) : null,
+          source: data.source ? String(data.source) : undefined,
         });
       })
-      .catch(() => setShipping(null));
-  }, [items, customer?.id]);
+      .catch(() => setShipping(null))
+      .finally(() => setLoadingShip(false));
+  }, [items, customer?.id, shippingMethod]);
 
-  const total = subtotal + (shipping?.amount || 0);
+  const freightAmount =
+    shippingMethod === "uber" ? 0 : shipping?.amount || 0;
+  const total = subtotal + freightAmount;
+
+  function selectMethod(method: ShippingMethod) {
+    setShippingMethod(method);
+  }
 
   return (
     <>
@@ -135,21 +155,95 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                 </li>
               ))}
             </ul>
-            <div className="mt-6 space-y-2 rounded-2xl bg-[var(--color-accent)] p-4 text-sm lg:sticky lg:top-24 lg:mt-0">
+            <div className="mt-6 space-y-3 rounded-2xl bg-[var(--color-accent)] p-4 text-sm lg:sticky lg:top-24 lg:mt-0">
+              {customer && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Como deseja receber?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => selectMethod("delivery")}
+                    className={cn(
+                      "w-full rounded-xl border bg-white p-3 text-left transition-colors",
+                      shippingMethod === "delivery"
+                        ? "border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]"
+                        : "border-transparent hover:border-gray-200"
+                    )}
+                  >
+                    <p className="font-medium text-gray-900">Entrega (transportadora)</p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Cotação Melhor Envio / frete da região
+                    </p>
+                    {shippingMethod === "delivery" && shipping && !shipping.blocked && (
+                      <p className="mt-1 text-xs text-[var(--color-primary)]">
+                        {formatCurrency(shipping.amount)}
+                        {shipping.delivery_range
+                          ? ` · prazo ${shipping.delivery_range}`
+                          : ""}
+                        {shipping.label ? ` · ${shipping.label}` : ""}
+                      </p>
+                    )}
+                    {shippingMethod === "delivery" && loadingShip && (
+                      <p className="mt-1 text-xs text-gray-400">Calculando frete...</p>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectMethod("uber")}
+                    className={cn(
+                      "w-full rounded-xl border bg-white p-3 text-left transition-colors",
+                      shippingMethod === "uber"
+                        ? "border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]"
+                        : "border-transparent hover:border-gray-200"
+                    )}
+                  >
+                    <p className="font-medium text-gray-900">Uber</p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Você solicita o Uber e combina com a loja no WhatsApp. Frete
+                      não entra no total do site.
+                    </p>
+                    {shippingMethod === "uber" && (
+                      <p className="mt-1 text-xs text-[var(--color-primary)]">
+                        Frete a combinar · R$ 0,00 no checkout
+                      </p>
+                    )}
+                  </button>
+                </div>
+              )}
+
               <div className="flex justify-between">
                 <span>Subtotal</span>
                 <span>{formatCurrency(subtotal)}</span>
               </div>
-              {shipping && (
-                <div className="flex justify-between">
-                  <span>Frete {shipping.label && `(${shipping.label})`}</span>
-                  <span>
-                    {shipping.blocked
-                      ? "Indisponível"
-                      : formatCurrency(shipping.amount)}
+              {customer && (
+                <div className="flex justify-between gap-2">
+                  <span className="min-w-0">
+                    Frete
+                    {shippingMethod === "uber"
+                      ? " (Uber)"
+                      : shipping?.label
+                        ? ` (${shipping.label})`
+                        : ""}
+                  </span>
+                  <span className="shrink-0 text-right">
+                    {shippingMethod === "uber"
+                      ? "A combinar"
+                      : shipping?.blocked
+                        ? "Indisponível"
+                        : loadingShip
+                          ? "..."
+                          : formatCurrency(freightAmount)}
                   </span>
                 </div>
               )}
+              {shippingMethod === "delivery" &&
+                shipping?.delivery_range &&
+                !shipping.blocked && (
+                  <p className="text-xs text-gray-500">
+                    Prazo estimado: {shipping.delivery_range}
+                  </p>
+                )}
               <div className="flex justify-between border-t border-[var(--color-primary)]/10 pt-2 font-semibold">
                 <span>Total</span>
                 <span className="text-[var(--color-primary)]">
@@ -166,8 +260,8 @@ export function CartPageClient({ settings }: CartPageClientProps) {
               )}
               <Link
                 href="/checkout"
-                className={`mt-4 flex w-full items-center justify-center rounded-full py-3.5 text-sm font-semibold text-white md:py-4 md:text-base ${
-                  shipping?.blocked
+                className={`mt-2 flex w-full items-center justify-center rounded-full py-3.5 text-sm font-semibold text-white md:py-4 md:text-base ${
+                  shippingMethod === "delivery" && shipping?.blocked
                     ? "pointer-events-none bg-gray-300"
                     : "bg-[var(--color-primary)]"
                 }`}
