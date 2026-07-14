@@ -70,7 +70,7 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
         {giftPreview && (
           <div className="absolute bottom-2 right-2 flex flex-col items-end gap-0.5">
             <div
-              className="relative h-11 w-11 overflow-hidden rounded-full border-2 bg-white shadow-md"
+              className="relative h-[70px] w-[70px] overflow-hidden rounded-full border-2 bg-white shadow-md"
               style={{ borderColor: GIFT_LILAC }}
               title={`Brinde: ${giftPreview.name}`}
             >
@@ -82,14 +82,14 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
                 />
               ) : (
                 <div
-                  className="flex h-full w-full items-center justify-center text-[9px] font-bold text-white"
+                  className="flex h-full w-full items-center justify-center text-sm font-bold text-white"
                   style={{ backgroundColor: GIFT_LILAC }}
                 >
                   +
                 </div>
               )}
               <span
-                className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-1.5 text-[8px] font-bold uppercase text-white"
+                className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase text-white"
                 style={{ backgroundColor: GIFT_LILAC }}
               >
                 Grátis
@@ -97,7 +97,7 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
             </div>
             {gifts.length > 1 && (
               <span
-                className="rounded-full px-1.5 text-[9px] font-semibold text-white"
+                className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
                 style={{ backgroundColor: GIFT_LILAC }}
               >
                 +{gifts.length - 1}

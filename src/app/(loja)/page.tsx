@@ -8,7 +8,7 @@ import { StoreHeader } from "@/components/store/StoreHeader";
 import { BannerCarousel } from "@/components/store/BannerCarousel";
 import { ProductCard } from "@/components/store/ProductCard";
 import Link from "next/link";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { STORE_MAIN, PRODUCT_GRID } from "@/lib/store-layout";
 
 export default async function HomePage() {
@@ -45,25 +45,6 @@ export default async function HomePage() {
         {carouselUrls.length > 0 && (
           <section className="mb-6">
             <BannerCarousel urls={carouselUrls} />
-          </section>
-        )}
-
-        {promotions.length > 0 && (
-          <section className="mb-6 rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary)]/80 p-4 text-white md:p-6 lg:rounded-3xl">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-[var(--color-secondary)]" />
-              <h2 className="font-semibold">Promoções ativas</h2>
-            </div>
-            <ul className="mt-2 space-y-1 text-sm opacity-90">
-              {promotions.slice(0, 3).map((p) => (
-                <li key={p.id}>
-                  {p.name} —{" "}
-                  {p.discount_type === "percent"
-                    ? `${p.discount_value}% off`
-                    : `R$ ${p.discount_value} off`}
-                </li>
-              ))}
-            </ul>
           </section>
         )}
 
