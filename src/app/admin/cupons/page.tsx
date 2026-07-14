@@ -1,16 +1,56 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
+import {
+  AdminCard,
+  AdminInput,
+  AdminButton,
+  AdminFormActions,
+} from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { formatCurrency } from "@/lib/utils";
 import type { Coupon } from "@/types";
 
+const PROMO_TYPES = [
+  { value: "VERAO", label: "VERAO" },
+  { value: "FRETE", label: "FRETE" },
+  { value: "OUTRO", label: "OUTRO" },
+] as const;
+
+const SUFFIX_CHARS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+function randomSuffix(length = 4): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => SUFFIX_CHARS[b % SUFFIX_CHARS.length]).join(
+    ""
+  );
+}
+
+function normalizeTipo(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, 16);
+}
+
+function buildCouponCode(tipo: string, suffix: string): string {
+  const t = normalizeTipo(tipo) || "OUTRO";
+  return `LM-${t}-${suffix}`;
+}
+
 export default function AdminCuponsPage() {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [promoKind, setPromoKind] = useState<"VERAO" | "FRETE" | "OUTRO">(
+    "VERAO"
+  );
+  const [customTipo, setCustomTipo] = useState("");
+  const [suffix, setSuffix] = useState(() => randomSuffix());
   const [form, setForm] = useState({
-    code: "",
     title: "",
     image_url: "",
     discount_type: "percent" as "percent" | "fixed",
@@ -20,6 +60,13 @@ export default function AdminCuponsPage() {
   });
   const [message, setMessage] = useState("");
   const supabase = createClient();
+
+  const tipo =
+    promoKind === "OUTRO" ? normalizeTipo(customTipo) || "OUTRO" : promoKind;
+  const code = useMemo(
+    () => buildCouponCode(tipo, suffix),
+    [tipo, suffix]
+  );
 
   async function load() {
     const { data } = await supabase
@@ -36,9 +83,8 @@ export default function AdminCuponsPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setMessage("");
-    const code = form.code.trim().toUpperCase().replace(/\s+/g, "");
-    if (!code) {
-      setMessage("Informe o código");
+    if (promoKind === "OUTRO" && !normalizeTipo(customTipo)) {
+      setMessage("Informe o tipo do cupom (ex: NATAL)");
       return;
     }
     const { error } = await supabase.from("coupons").insert({
@@ -56,7 +102,6 @@ export default function AdminCuponsPage() {
       return;
     }
     setForm({
-      code: "",
       title: "",
       image_url: "",
       discount_type: "percent",
@@ -64,29 +109,79 @@ export default function AdminCuponsPage() {
       max_uses: 50,
       active: true,
     });
+    setPromoKind("VERAO");
+    setCustomTipo("");
+    setSuffix(randomSuffix());
     setMessage("Cupom criado");
     load();
   }
 
   async function setActive(id: string, active: boolean) {
-    await supabase.from("coupons").update({ active, updated_at: new Date().toISOString() }).eq("id", id);
+    await supabase
+      .from("coupons")
+      .update({ active, updated_at: new Date().toISOString() })
+      .eq("id", id);
     load();
   }
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-[var(--color-primary)]">Cupons</h1>
+      <h1 className="mb-6 text-2xl font-bold text-[var(--color-primary)]">
+        Cupons
+      </h1>
       {message && <p className="mb-4 text-sm text-gray-600">{message}</p>}
       <div className="grid gap-6 lg:grid-cols-2">
         <AdminCard title="Novo cupom">
           <form onSubmit={save} className="space-y-3">
-            <AdminInput
-              label="Código"
-              value={form.code}
-              onChange={(e) => setForm({ ...form, code: e.target.value })}
-              placeholder="EX: VERAO10"
-              required
-            />
+            <div>
+              <label className="text-sm font-medium text-gray-700">
+                Tipo da promoção
+              </label>
+              <select
+                value={promoKind}
+                onChange={(e) =>
+                  setPromoKind(e.target.value as "VERAO" | "FRETE" | "OUTRO")
+                }
+                className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+              >
+                {PROMO_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {promoKind === "OUTRO" && (
+              <AdminInput
+                label="Nome do tipo"
+                value={customTipo}
+                onChange={(e) => setCustomTipo(e.target.value)}
+                placeholder="Ex: NATAL"
+                required
+              />
+            )}
+            <div>
+              <label className="text-sm font-medium text-gray-700">
+                Código gerado
+              </label>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <code className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 font-mono text-sm tracking-wide text-[var(--color-primary)]">
+                  LM-
+                  <span className="font-semibold">{tipo}</span>-
+                  <span>{suffix}</span>
+                </code>
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setSuffix(randomSuffix())}
+                >
+                  Novo sufixo
+                </AdminButton>
+              </div>
+              <p className="mt-1 text-xs text-gray-400">
+                Máscara: LM-{"{TIPO}"}-{"{4 caracteres}"} — o final gera sozinho
+              </p>
+            </div>
             <AdminInput
               label="Título"
               value={form.title}
@@ -137,7 +232,9 @@ export default function AdminCuponsPage() {
               <input
                 type="checkbox"
                 checked={form.active}
-                onChange={(e) => setForm({ ...form, active: e.target.checked })}
+                onChange={(e) =>
+                  setForm({ ...form, active: e.target.checked })
+                }
               />
               Ativo
             </label>
@@ -165,7 +262,7 @@ export default function AdminCuponsPage() {
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="font-medium">{c.code}</p>
+                  <p className="font-mono font-medium">{c.code}</p>
                   <p className="truncate text-gray-400">
                     {c.title} ·{" "}
                     {c.discount_type === "percent"

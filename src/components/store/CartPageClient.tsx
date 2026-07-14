@@ -295,9 +295,9 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                   <input
                     type="text"
                     value={couponInput}
-                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                    placeholder="Código"
-                    className="min-w-0 flex-1 rounded-xl border border-white/60 bg-white px-3 py-2 text-sm"
+                    onChange={(e) => setCouponInput(e.target.value)}
+                    placeholder="LM-VERAO-a9F5"
+                    className="min-w-0 flex-1 rounded-xl border border-white/60 bg-white px-3 py-2 text-sm font-mono"
                   />
                   <button
                     type="button"
