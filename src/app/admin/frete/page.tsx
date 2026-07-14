@@ -9,6 +9,14 @@ import type { ShippingZone } from "@/types";
 export default function AdminFretePage() {
   const [zones, setZones] = useState<ShippingZone[]>([]);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [meStatus, setMeStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    expiresAt: string | null;
+    expiresInDays: number | null;
+    redirectUri: string;
+  } | null>(null);
+  const [meMsg, setMeMsg] = useState("");
   const [form, setForm] = useState<ShippingZone>({
     zone_type: "paid",
     scope: "state",
@@ -32,7 +40,28 @@ export default function AdminFretePage() {
     if (s) setSettings(s);
   }
 
-  useEffect(() => { load(); }, []);
+  async function loadMeStatus() {
+    try {
+      const res = await fetch("/api/admin/melhor-envio/status");
+      if (!res.ok) return;
+      setMeStatus(await res.json());
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    load();
+    loadMeStatus();
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("me_error");
+    const ok = params.get("me");
+    if (err) setMeMsg(`Erro: ${err}`);
+    if (ok === "connected") {
+      setMeMsg("Melhor Envio conectado com sucesso.");
+      loadMeStatus();
+    }
+  }, []);
 
   async function saveZone(e: React.FormEvent) {
     e.preventDefault();
@@ -55,9 +84,64 @@ export default function AdminFretePage() {
     load();
   }
 
+  async function disconnectMe() {
+    if (!confirm("Desconectar Melhor Envio?")) return;
+    await fetch("/api/admin/melhor-envio/status", { method: "DELETE" });
+    setMeMsg("Desconectado.");
+    loadMeStatus();
+  }
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-[var(--color-primary)]">Frete</h1>
+
+      <AdminCard title="Integração Melhor Envio (OAuth)">
+        <div className="space-y-3 text-sm">
+          {meMsg && (
+            <p className={`rounded-xl px-3 py-2 ${meMsg.startsWith("Erro") ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
+              {meMsg}
+            </p>
+          )}
+          {!meStatus?.configured ? (
+            <p className="text-amber-700">
+              Configure no Vercel: <code>MELHOR_ENVIO_CLIENT_ID</code>,{" "}
+              <code>MELHOR_ENVIO_CLIENT_SECRET</code> e{" "}
+              <code>APP_BASE_URL</code>. No app do Melhor Envio, use o redirect:
+            </p>
+          ) : meStatus.connected ? (
+            <p className="text-gray-600">
+              Conectado
+              {meStatus.expiresInDays != null
+                ? ` · token renova sozinho (expira em ~${meStatus.expiresInDays} dias)`
+                : ""}
+            </p>
+          ) : (
+            <p className="text-gray-600">
+              App configurado. Clique em conectar e autorize no Melhor Envio.
+            </p>
+          )}
+          {meStatus?.redirectUri && (
+            <p className="break-all rounded-lg bg-gray-50 p-2 text-xs text-gray-500">
+              Redirect URI (cole no app Melhor Envio):{" "}
+              <strong>{meStatus.redirectUri}</strong>
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <a href="/api/admin/melhor-envio/connect">
+              <AdminButton type="button">
+                {meStatus?.connected ? "Reconectar" : "Conectar Melhor Envio"}
+              </AdminButton>
+            </a>
+            {meStatus?.connected && (
+              <AdminButton type="button" variant="secondary" onClick={disconnectMe}>
+                Desconectar
+              </AdminButton>
+            )}
+          </div>
+        </div>
+      </AdminCard>
+
+      <div className="mt-6">
       <AdminCard title="Endereço remetente">
         <form onSubmit={saveSender} className="grid gap-3 md:grid-cols-2">
           <AdminInput label="CEP remetente" value={String(settings.sender_zip || "")} onChange={(e) => setSettings({ ...settings, sender_zip: e.target.value })} />
@@ -72,11 +156,13 @@ export default function AdminFretePage() {
           <AdminInput label="Peso padrão (kg)" type="number" step="0.1" value={Number(settings.default_package_weight_kg) || 0.3} onChange={(e) => setSettings({ ...settings, default_package_weight_kg: Number(e.target.value) })} />
           <label className="flex items-center gap-2 text-sm md:col-span-2">
             <input type="checkbox" checked={Boolean(settings.melhor_envio_enabled)} onChange={(e) => setSettings({ ...settings, melhor_envio_enabled: e.target.checked })} />
-            Melhor Envio ativo (requer token no Vercel)
+            Melhor Envio ativo na cotação do carrinho
           </label>
           <AdminButton type="submit">Salvar remetente</AdminButton>
         </form>
       </AdminCard>
+      </div>
+
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <AdminCard title="Nova zona">
           <form onSubmit={saveZone} className="space-y-3">

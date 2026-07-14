@@ -1,5 +1,9 @@
 import type { ShippingQuote } from "@/types";
 import { addressFieldsFromCustomer, type AddressFields } from "@/lib/address";
+import {
+  getValidMelhorEnvioAccessToken,
+  melhorEnvioUserAgent,
+} from "@/lib/melhor-envio";
 import { createClient } from "@/lib/supabase/server";
 
 export interface MelhorEnvioQuote {
@@ -58,23 +62,27 @@ export async function quoteMelhorEnvio(params: {
   weightKg: number;
   insuranceValue: number;
 }): Promise<MelhorEnvioQuote | null> {
-  const token = (process.env.MELHOR_ENVIO_TOKEN || "").trim();
+  const token = await getValidMelhorEnvioAccessToken();
   if (!token) return null;
 
   const fromZip = params.fromPostal.replace(/\D/g, "");
   const toZip = params.toPostal.replace(/\D/g, "");
   if (fromZip.length !== 8 || toZip.length !== 8) return null;
 
+  const apiHost = (process.env.MELHOR_ENVIO_SANDBOX || "").trim() === "true"
+    ? "https://sandbox.melhorenvio.com.br"
+    : "https://melhorenvio.com.br";
+
   try {
     const res = await fetch(
-      "https://melhorenvio.com.br/api/v2/me/shipment/calculate",
+      `${apiHost}/api/v2/me/shipment/calculate`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
           Accept: "application/json",
-          "User-Agent": "catalogo-loja (contato@loja.local)",
+          "User-Agent": melhorEnvioUserAgent(),
         },
         body: JSON.stringify({
           from: { postal_code: fromZip },
@@ -190,9 +198,7 @@ export async function calculateShipping(
     };
   }
 
-  const melhorEnabled =
-    Boolean(process.env.MELHOR_ENVIO_TOKEN) && Boolean(settings.melhor_envio_enabled);
-  if (melhorEnabled) {
+  if (settings.melhor_envio_enabled) {
     const pieces = lines.reduce((s, l) => s + (Number(l.quantity) || 1), 0);
     const weight = Number(settings.default_package_weight_kg) || 0.3;
     const me = await quoteMelhorEnvio({
