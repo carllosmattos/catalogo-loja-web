@@ -91,6 +91,11 @@ async function requestToken(body: Record<string, string>): Promise<TokenResponse
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.access_token) {
+    if (data?.error === "invalid_client") {
+      throw new Error(
+        "invalid_client: Client ID/Secret incorretos ou sandbox/produção trocados no Vercel."
+      );
+    }
     const msg =
       data?.message ||
       data?.error_description ||

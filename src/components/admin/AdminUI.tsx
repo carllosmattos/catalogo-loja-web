@@ -44,23 +44,50 @@ export function AdminInput({
 export function AdminButton({
   children,
   variant = "primary",
+  fullWidth = false,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "danger";
+  fullWidth?: boolean;
 }) {
   const variants = {
-    primary: "bg-[var(--color-primary)] text-white",
-    secondary: "border border-gray-300 text-gray-700",
-    danger: "bg-red-600 text-white",
+    primary:
+      "bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm",
+    secondary:
+      "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+    danger: "bg-red-600 text-white hover:bg-red-700",
   };
   return (
     <button
       {...props}
       className={cn(
-        "rounded-full px-4 py-2 text-sm font-medium disabled:opacity-50",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        fullWidth && "w-full",
         variants[variant],
         props.className
       )}
-    />
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Área de ação no rodapé do formulário (botão de submit alinhado). */
+export function AdminFormActions({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4",
+        className
+      )}
+    >
+      {children}
+    </div>
   );
 }

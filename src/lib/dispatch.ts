@@ -41,24 +41,16 @@ export function nextDispatchDate(
 export function formatDispatchDeadline(
   waitDays: number,
   transportDays: number | null,
-  weekday: number
+  _weekday?: number
 ): string {
-  const shipLabel = weekdayLabel(weekday);
-  const waitPart =
-    waitDays === 0
-      ? `envio ${shipLabel} (hoje)`
-      : waitDays === 1
-        ? `envio ${shipLabel} (amanhã)`
-        : `envio ${shipLabel} (daqui a ${waitDays} dias)`;
+  const total =
+    transportDays != null && Number.isFinite(transportDays)
+      ? waitDays + Math.max(0, transportDays)
+      : waitDays;
 
-  if (transportDays == null) return waitPart;
-  if (transportDays <= 0) return `${waitPart} · entrega no mesmo dia`;
-  const transport =
-    transportDays === 1
-      ? "1 dia útil de transporte"
-      : `${transportDays} dias úteis de transporte`;
-  const totalHint = waitDays + transportDays;
-  return `${waitPart} + ${transport} ≈ ${totalHint} dias`;
+  if (total <= 0) return "mesmo dia";
+  if (total === 1) return "até 1 dia";
+  return `até ${total} dias`;
 }
 
 export function parseDispatchWeekdays(raw: unknown): number[] {

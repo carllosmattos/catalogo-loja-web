@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { formatCurrency } from "@/lib/utils";
 
 export default function AdminVendasPage() {
@@ -68,7 +68,9 @@ export default function AdminVendasPage() {
             <AdminInput label="Tamanho" value={form.product_size} onChange={(e) => setForm({ ...form, product_size: e.target.value })} />
             <AdminInput label="Quantidade" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} />
             <AdminInput label="Preço final" type="number" step="0.01" value={form.preco_final} onChange={(e) => setForm({ ...form, preco_final: Number(e.target.value) })} />
-            <AdminButton type="submit">Registrar</AdminButton>
+            <AdminFormActions>
+              <AdminButton type="submit">Registrar venda</AdminButton>
+            </AdminFormActions>
           </form>
         </AdminCard>
         <AdminCard title="Histórico">

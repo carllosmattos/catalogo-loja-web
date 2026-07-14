@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { formatCurrency } from "@/lib/utils";
 import type { Coupon } from "@/types";
@@ -141,7 +141,9 @@ export default function AdminCuponsPage() {
               />
               Ativo
             </label>
-            <AdminButton type="submit">Criar cupom</AdminButton>
+            <AdminFormActions>
+              <AdminButton type="submit">Criar cupom</AdminButton>
+            </AdminFormActions>
           </form>
         </AdminCard>
         <AdminCard title="Lista">

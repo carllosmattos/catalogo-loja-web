@@ -40,23 +40,21 @@ export function ImageUploadField({
   return (
     <div className="space-y-2">
       {label && <label className="text-sm font-medium text-gray-700">{label}</label>}
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          onChange={onFile}
-          className="text-sm file:mr-2 file:rounded-full file:border-0 file:bg-[var(--color-accent)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--color-primary)]"
-        />
-        <AdminButton
-          type="button"
-          variant="secondary"
-          onClick={() => inputRef.current?.click()}
-          disabled={loading}
-        >
-          {loading ? "Enviando..." : "Enviar arquivo"}
-        </AdminButton>
-      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        onChange={onFile}
+        className="hidden"
+      />
+      <AdminButton
+        type="button"
+        variant="secondary"
+        onClick={() => inputRef.current?.click()}
+        disabled={loading}
+      >
+        {loading ? "Enviando..." : "Escolher arquivo"}
+      </AdminButton>
       <input
         type="url"
         value={value}
@@ -65,7 +63,11 @@ export function ImageUploadField({
         className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
       />
       {value && (
-        <img src={value} alt="" className="h-20 w-28 rounded-lg object-cover ring-1 ring-black/5" />
+        <img
+          src={value}
+          alt=""
+          className="h-20 w-28 rounded-lg object-cover ring-1 ring-black/5"
+        />
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>

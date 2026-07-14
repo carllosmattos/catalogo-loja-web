@@ -2,10 +2,46 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import {
+  AdminCard,
+  AdminInput,
+  AdminButton,
+  AdminFormActions,
+} from "@/components/admin/AdminUI";
 import { BRAZILIAN_STATES } from "@/lib/address";
 import { WEEKDAY_OPTIONS, parseDispatchWeekdays } from "@/lib/dispatch";
 import type { ShippingZone } from "@/types";
+
+function parseMeError(raw: string | null): string {
+  if (!raw) return "";
+  const decoded = decodeURIComponent(raw);
+  try {
+    const json = JSON.parse(decoded) as {
+      error?: string;
+      error_description?: string;
+      message?: string;
+    };
+    if (json.error === "invalid_client") {
+      return (
+        "Client ID ou Client Secret inválidos no Vercel (ou ambiente sandbox/produção trocado). " +
+        "Confira MELHOR_ENVIO_CLIENT_ID, MELHOR_ENVIO_CLIENT_SECRET e MELHOR_ENVIO_SANDBOX."
+      );
+    }
+    return (
+      json.error_description ||
+      json.message ||
+      json.error ||
+      decoded
+    );
+  } catch {
+    if (decoded.includes("invalid_client")) {
+      return (
+        "Client ID ou Client Secret inválidos no Vercel (ou sandbox/produção trocado)."
+      );
+    }
+    return decoded;
+  }
+}
 
 export default function AdminFretePage() {
   const [zones, setZones] = useState<ShippingZone[]>([]);
@@ -18,6 +54,7 @@ export default function AdminFretePage() {
     redirectUri: string;
   } | null>(null);
   const [meMsg, setMeMsg] = useState("");
+  const [meError, setMeError] = useState("");
   const [form, setForm] = useState<ShippingZone>({
     zone_type: "paid",
     scope: "state",
@@ -34,7 +71,10 @@ export default function AdminFretePage() {
 
   async function load() {
     const [{ data: z }, { data: s }] = await Promise.all([
-      supabase.from("shipping_zones").select("*").order("priority", { ascending: false }),
+      supabase
+        .from("shipping_zones")
+        .select("*")
+        .order("priority", { ascending: false }),
       supabase.from("store_settings").select("*").limit(1).single(),
     ]);
     setZones(z || []);
@@ -55,12 +95,15 @@ export default function AdminFretePage() {
     load();
     loadMeStatus();
     const params = new URLSearchParams(window.location.search);
-    const err = params.get("me_error");
+    const err = parseMeError(params.get("me_error"));
     const ok = params.get("me");
-    if (err) setMeMsg(`Erro: ${err}`);
+    if (err) setMeError(err);
     if (ok === "connected") {
       setMeMsg("Melhor Envio conectado com sucesso.");
       loadMeStatus();
+    }
+    if (err || ok) {
+      window.history.replaceState({}, "", "/admin/frete");
     }
   }, []);
 
@@ -74,17 +117,20 @@ export default function AdminFretePage() {
   async function saveSender(e: React.FormEvent) {
     e.preventDefault();
     if (!settings.id) return;
-    await supabase.from("store_settings").update({
-      sender_zip: settings.sender_zip,
-      sender_street: settings.sender_street,
-      sender_city: settings.sender_city,
-      sender_state: settings.sender_state,
-      default_package_weight_kg: settings.default_package_weight_kg,
-      melhor_envio_enabled: settings.melhor_envio_enabled,
-      shipping_dispatch_weekdays: parseDispatchWeekdays(
-        settings.shipping_dispatch_weekdays
-      ),
-    }).eq("id", settings.id);
+    await supabase
+      .from("store_settings")
+      .update({
+        sender_zip: settings.sender_zip,
+        sender_street: settings.sender_street,
+        sender_city: settings.sender_city,
+        sender_state: settings.sender_state,
+        default_package_weight_kg: settings.default_package_weight_kg,
+        melhor_envio_enabled: settings.melhor_envio_enabled,
+        shipping_dispatch_weekdays: parseDispatchWeekdays(
+          settings.shipping_dispatch_weekdays
+        ),
+      })
+      .eq("id", settings.id);
     load();
   }
 
@@ -100,17 +146,25 @@ export default function AdminFretePage() {
     if (!confirm("Desconectar Melhor Envio?")) return;
     await fetch("/api/admin/melhor-envio/status", { method: "DELETE" });
     setMeMsg("Desconectado.");
+    setMeError("");
     loadMeStatus();
   }
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-[var(--color-primary)]">Frete</h1>
+      <h1 className="mb-6 text-2xl font-bold text-[var(--color-primary)]">
+        Frete
+      </h1>
 
       <AdminCard title="Integração Melhor Envio (OAuth)">
         <div className="space-y-3 text-sm">
-          {meMsg && (
-            <p className={`rounded-xl px-3 py-2 ${meMsg.startsWith("Erro") ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
+          {meError && (
+            <p className="rounded-xl bg-red-50 px-3 py-2 text-red-700">
+              {meError}
+            </p>
+          )}
+          {meMsg && !meError && (
+            <p className="rounded-xl bg-green-50 px-3 py-2 text-green-700">
               {meMsg}
             </p>
           )}
@@ -118,7 +172,8 @@ export default function AdminFretePage() {
             <p className="text-amber-700">
               Configure no Vercel: <code>MELHOR_ENVIO_CLIENT_ID</code>,{" "}
               <code>MELHOR_ENVIO_CLIENT_SECRET</code> e{" "}
-              <code>APP_BASE_URL</code>. No app do Melhor Envio, use o redirect:
+              <code>APP_BASE_URL</code>. No app do Melhor Envio, use o redirect
+              abaixo.
             </p>
           ) : meStatus.connected ? (
             <p className="text-gray-600">
@@ -138,69 +193,126 @@ export default function AdminFretePage() {
               <strong>{meStatus.redirectUri}</strong>
             </p>
           )}
-          <div className="flex flex-wrap gap-2">
-            <a href="/api/admin/melhor-envio/connect">
-              <AdminButton type="button">
-                {meStatus?.connected ? "Reconectar" : "Conectar Melhor Envio"}
-              </AdminButton>
+          <AdminFormActions>
+            <a
+              href="/api/admin/melhor-envio/connect"
+              className="inline-flex shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+            >
+              {meStatus?.connected ? "Reconectar" : "Conectar Melhor Envio"}
             </a>
             {meStatus?.connected && (
-              <AdminButton type="button" variant="secondary" onClick={disconnectMe}>
+              <AdminButton
+                type="button"
+                variant="secondary"
+                onClick={disconnectMe}
+              >
                 Desconectar
               </AdminButton>
             )}
-          </div>
+          </AdminFormActions>
         </div>
       </AdminCard>
 
       <div className="mt-6">
-      <AdminCard title="Endereço remetente">
-        <form onSubmit={saveSender} className="grid gap-3 md:grid-cols-2">
-          <AdminInput label="CEP remetente" value={String(settings.sender_zip || "")} onChange={(e) => setSettings({ ...settings, sender_zip: e.target.value })} />
-          <AdminInput label="Rua" value={String(settings.sender_street || "")} onChange={(e) => setSettings({ ...settings, sender_street: e.target.value })} />
-          <AdminInput label="Cidade" value={String(settings.sender_city || "")} onChange={(e) => setSettings({ ...settings, sender_city: e.target.value })} />
-          <div>
-            <label className="text-sm font-medium">UF</label>
-            <select value={String(settings.sender_state || "SP")} onChange={(e) => setSettings({ ...settings, sender_state: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
-              {BRAZILIAN_STATES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
-            </select>
-          </div>
-          <AdminInput label="Peso padrão (kg)" type="number" step="0.1" value={Number(settings.default_package_weight_kg) || 0.3} onChange={(e) => setSettings({ ...settings, default_package_weight_kg: Number(e.target.value) })} />
-          <label className="flex items-center gap-2 text-sm md:col-span-2">
-            <input type="checkbox" checked={Boolean(settings.melhor_envio_enabled)} onChange={(e) => setSettings({ ...settings, melhor_envio_enabled: e.target.checked })} />
-            Melhor Envio ativo na cotação do carrinho
-          </label>
-          <div className="md:col-span-2 space-y-2">
-            <p className="text-sm font-medium">Dias de coleta / envio</p>
-            <p className="text-xs text-gray-500">
-              O prazo do cliente = dias até o próximo dia de envio + prazo do Melhor Envio.
-              Se marcar vários dias, usa o mais próximo da data da compra.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {WEEKDAY_OPTIONS.map((w) => {
-                const selected = parseDispatchWeekdays(
-                  settings.shipping_dispatch_weekdays
-                ).includes(w.value);
-                return (
-                  <button
-                    key={w.value}
-                    type="button"
-                    onClick={() => toggleDispatchDay(w.value)}
-                    className={`rounded-full px-3 py-1.5 text-sm ${
-                      selected
-                        ? "bg-[var(--color-primary)] text-white"
-                        : "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {w.label}
-                  </button>
-                );
-              })}
+        <AdminCard title="Endereço remetente">
+          <form onSubmit={saveSender} className="grid gap-3 md:grid-cols-2">
+            <AdminInput
+              label="CEP remetente"
+              value={String(settings.sender_zip || "")}
+              onChange={(e) =>
+                setSettings({ ...settings, sender_zip: e.target.value })
+              }
+            />
+            <AdminInput
+              label="Rua"
+              value={String(settings.sender_street || "")}
+              onChange={(e) =>
+                setSettings({ ...settings, sender_street: e.target.value })
+              }
+            />
+            <AdminInput
+              label="Cidade"
+              value={String(settings.sender_city || "")}
+              onChange={(e) =>
+                setSettings({ ...settings, sender_city: e.target.value })
+              }
+            />
+            <div>
+              <label className="text-sm font-medium">UF</label>
+              <select
+                value={String(settings.sender_state || "SP")}
+                onChange={(e) =>
+                  setSettings({ ...settings, sender_state: e.target.value })
+                }
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+              >
+                {BRAZILIAN_STATES.map((uf) => (
+                  <option key={uf} value={uf}>
+                    {uf}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-          <AdminButton type="submit">Salvar remetente</AdminButton>
-        </form>
-      </AdminCard>
+            <AdminInput
+              label="Peso padrão (kg)"
+              type="number"
+              step="0.1"
+              value={Number(settings.default_package_weight_kg) || 0.3}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  default_package_weight_kg: Number(e.target.value),
+                })
+              }
+            />
+            <label className="flex items-center gap-2 text-sm md:col-span-2">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.melhor_envio_enabled)}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    melhor_envio_enabled: e.target.checked,
+                  })
+                }
+              />
+              Melhor Envio ativo na cotação do carrinho
+            </label>
+            <div className="space-y-2 md:col-span-2">
+              <p className="text-sm font-medium">Dias de coleta / envio</p>
+              <p className="text-xs text-gray-500">
+                O prazo mostrado ao cliente é o total (espera até a coleta +
+                transporte). Com vários dias, usa o mais próximo da compra.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {WEEKDAY_OPTIONS.map((w) => {
+                  const selected = parseDispatchWeekdays(
+                    settings.shipping_dispatch_weekdays
+                  ).includes(w.value);
+                  return (
+                    <button
+                      key={w.value}
+                      type="button"
+                      onClick={() => toggleDispatchDay(w.value)}
+                      className={`rounded-xl px-3 py-1.5 text-sm font-medium ${
+                        selected
+                          ? "bg-[var(--color-primary)] text-white"
+                          : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <AdminFormActions>
+                <AdminButton type="submit">Salvar remetente</AdminButton>
+              </AdminFormActions>
+            </div>
+          </form>
+        </AdminCard>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -208,7 +320,16 @@ export default function AdminFretePage() {
           <form onSubmit={saveZone} className="space-y-3">
             <div>
               <label className="text-sm font-medium">Tipo</label>
-              <select value={form.zone_type} onChange={(e) => setForm({ ...form, zone_type: e.target.value as ShippingZone["zone_type"] })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <select
+                value={form.zone_type}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    zone_type: e.target.value as ShippingZone["zone_type"],
+                  })
+                }
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+              >
                 <option value="free">Grátis</option>
                 <option value="paid">Pago</option>
                 <option value="blocked">Bloqueado</option>
@@ -216,25 +337,62 @@ export default function AdminFretePage() {
             </div>
             <div>
               <label className="text-sm font-medium">Escopo</label>
-              <select value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value as ShippingZone["scope"] })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <select
+                value={form.scope}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    scope: e.target.value as ShippingZone["scope"],
+                  })
+                }
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+              >
                 <option value="state">Estado</option>
                 <option value="city">Cidade</option>
                 <option value="neighborhood">Bairro</option>
               </select>
             </div>
-            <AdminInput label="UF" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} />
-            <AdminInput label="Cidade" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-            <AdminInput label="Valor frete" type="number" step="0.01" value={form.freight_amount} onChange={(e) => setForm({ ...form, freight_amount: Number(e.target.value) })} />
-            <AdminInput label="Rótulo" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
-            <AdminButton type="submit">Adicionar zona</AdminButton>
+            <AdminInput
+              label="UF"
+              value={form.state}
+              onChange={(e) => setForm({ ...form, state: e.target.value })}
+            />
+            <AdminInput
+              label="Cidade"
+              value={form.city}
+              onChange={(e) => setForm({ ...form, city: e.target.value })}
+            />
+            <AdminInput
+              label="Valor frete"
+              type="number"
+              step="0.01"
+              value={form.freight_amount}
+              onChange={(e) =>
+                setForm({ ...form, freight_amount: Number(e.target.value) })
+              }
+            />
+            <AdminInput
+              label="Rótulo"
+              value={form.label}
+              onChange={(e) => setForm({ ...form, label: e.target.value })}
+            />
+            <AdminFormActions>
+              <AdminButton type="submit">Adicionar zona</AdminButton>
+            </AdminFormActions>
           </form>
         </AdminCard>
         <AdminCard title="Zonas cadastradas">
           <ul className="space-y-2 text-sm">
             {zones.map((z) => (
               <li key={z.id} className="rounded-lg border p-3">
-                <p className="font-medium">{z.label || z.zone_type} — {z.state}{z.city ? `/${z.city}` : ""}</p>
-                <p className="text-gray-400">{z.zone_type} · R$ {z.freight_amount}</p>
+                <p className="font-medium">
+                  {z.label || z.zone_type} — {z.state}
+                  {z.city ? `/${z.city}` : ""}
+                </p>
+                <p className="text-gray-400">
+                  {z.zone_type} · R${" "}
+                  {Number(z.freight_amount || 0).toFixed(2)}
+                </p>
               </li>
             ))}
           </ul>

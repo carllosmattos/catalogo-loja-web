@@ -237,7 +237,7 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                   >
                     <p className="font-medium text-gray-900">Entrega (transportadora)</p>
                     <p className="mt-0.5 text-xs text-gray-500">
-                      Cotação Melhor Envio / frete da região
+                      Frete calculado para o seu endereço
                     </p>
                     {shippingMethod === "delivery" && shipping && !shipping.blocked && (
                       <p className="mt-1 text-xs text-[var(--color-primary)]">
@@ -245,7 +245,6 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                         {shipping.delivery_range
                           ? ` · prazo ${shipping.delivery_range}`
                           : ""}
-                        {shipping.label ? ` · ${shipping.label}` : ""}
                       </p>
                     )}
                     {shippingMethod === "delivery" && loadingShip && (
@@ -340,14 +339,7 @@ export function CartPageClient({ settings }: CartPageClientProps) {
               )}
               {customer && (
                 <div className="flex justify-between gap-2">
-                  <span className="min-w-0">
-                    Frete
-                    {shippingMethod === "uber"
-                      ? " (Uber)"
-                      : shipping?.label
-                        ? ` (${shipping.label})`
-                        : ""}
-                  </span>
+                  <span className="min-w-0">Frete</span>
                   <span className="shrink-0 text-right">
                     {shippingMethod === "uber"
                       ? "A combinar"

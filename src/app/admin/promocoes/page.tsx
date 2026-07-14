@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import type { Promotion } from "@/types";
 
@@ -67,7 +67,9 @@ export default function AdminPromocoesPage() {
               <input type="checkbox" checked={form.show_banner} onChange={(e) => setForm({ ...form, show_banner: e.target.checked })} />
               Exibir banner
             </label>
-            <AdminButton type="submit">Criar</AdminButton>
+            <AdminFormActions>
+              <AdminButton type="submit">Criar promoção</AdminButton>
+            </AdminFormActions>
           </form>
         </AdminCard>
         <AdminCard title="Lista">

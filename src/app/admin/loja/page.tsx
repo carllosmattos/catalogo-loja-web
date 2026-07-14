@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { DEFAULT_SETTINGS } from "@/lib/branding";
 import type { StoreSettings } from "@/types";
@@ -76,7 +76,9 @@ export default function AdminLojaPage() {
             />
           </div>
           <div className="md:col-span-2">
-            <AdminButton type="submit">Salvar</AdminButton>
+            <AdminFormActions>
+              <AdminButton type="submit">Salvar loja</AdminButton>
+            </AdminFormActions>
           </div>
         </form>
       </AdminCard>

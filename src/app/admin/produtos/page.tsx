@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { SIZES, SIZE_LABELS } from "@/lib/sizes";
 import { formatCurrency } from "@/lib/utils";
@@ -241,28 +241,30 @@ export default function AdminProdutosPage() {
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
-              <AdminButton type="submit">Salvar</AdminButton>
+            <AdminFormActions>
+              <AdminButton type="submit">Salvar produto</AdminButton>
               {editing && (
                 <AdminButton type="button" variant="secondary" onClick={() => { setEditing(null); resetForm(); }}>
                   Cancelar
                 </AdminButton>
               )}
-            </div>
+            </AdminFormActions>
           </form>
         </AdminCard>
         <AdminCard title="Lista">
           <ul className="max-h-[600px] space-y-2 overflow-y-auto">
             {products.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-2 rounded-lg border p-3 text-sm">
-                {p.image_urls?.[0] && (
-                  <img src={p.image_urls[0]} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{p.name}</p>
-                  <p className="text-gray-400">{formatCurrency(Number(p.sale_price))} · {p.active ? "Ativo" : "Inativo"}</p>
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  {p.image_urls?.[0] && (
+                    <img src={p.image_urls[0]} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-medium">{p.name}</p>
+                    <p className="text-gray-400">{formatCurrency(Number(p.sale_price))} · {p.active ? "Ativo" : "Inativo"}</p>
+                  </div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex shrink-0 gap-2">
                   <AdminButton variant="secondary" onClick={() => editProduct(p)}>Editar</AdminButton>
                   <AdminButton variant="secondary" onClick={() => toggleActive(p.id, p.active)}>
                     {p.active ? "Arquivar" : "Ativar"}

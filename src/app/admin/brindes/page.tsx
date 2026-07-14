@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import type { Gift } from "@/types";
 
@@ -64,7 +64,9 @@ export default function AdminBrindesPage() {
               value={form.image_url}
               onChange={(url) => setForm({ ...form, image_url: url })}
             />
-            <AdminButton type="submit">Criar</AdminButton>
+            <AdminFormActions>
+              <AdminButton type="submit">Criar brinde</AdminButton>
+            </AdminFormActions>
           </form>
         </AdminCard>
         <AdminCard title="Lista">
