@@ -34,6 +34,13 @@ export interface Category {
   active: boolean;
 }
 
+export interface ProductGiftPreview {
+  gift_id: string;
+  name: string;
+  image_url: string | null;
+  quantity_per_sale: number;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -49,6 +56,8 @@ export interface Product {
   active: boolean;
   sizes?: SizeStock[];
   created_at?: string;
+  /** Brindes vinculados (catálogo / cards) */
+  linked_gifts?: ProductGiftPreview[];
 }
 
 export interface Gift {

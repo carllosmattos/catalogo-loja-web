@@ -89,26 +89,88 @@ export function ProductDetailClient({
           {product.category && (
             <p className="text-sm text-gray-400 md:text-base">{product.category}</p>
           )}
-          <div className="mt-2 flex items-baseline gap-2">
+          <div className="mt-2 flex flex-wrap items-end gap-2">
             {profit.desconto > 0 ? (
               <>
-                <span className="text-gray-400 line-through">
-                  {formatCurrency(profit.preco_catalogo)}
-                </span>
-                <span className="text-2xl font-bold text-[var(--color-primary)] md:text-3xl">
-                  {formatCurrency(profit.preco_final_cliente - Number(product.sale_freight))}
-                </span>
+                <div>
+                  <p className="text-sm text-gray-400 line-through md:text-base">
+                    {formatCurrency(profit.preco_catalogo)}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-2xl font-bold text-gray-900 md:text-3xl">
+                      {formatCurrency(
+                        Math.max(0, profit.preco_catalogo - profit.desconto)
+                      )}
+                    </span>
+                    {(() => {
+                      const pct = Math.round(
+                        (profit.desconto / profit.preco_catalogo) * 100
+                      );
+                      return pct > 0 ? (
+                        <span className="rounded-md bg-[#00A650] px-2 py-0.5 text-xs font-bold uppercase text-white">
+                          {pct}% OFF
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
               </>
             ) : (
-              <span className="text-2xl font-bold text-[var(--color-primary)] md:text-3xl">
+              <span className="text-2xl font-bold text-gray-900 md:text-3xl">
                 {formatCurrency(profit.preco_catalogo)}
               </span>
             )}
           </div>
-          {profit.promotion_name && (
-            <p className="mt-1 text-sm text-[var(--color-secondary)]">
+          {profit.promotion_name && profit.desconto > 0 && (
+            <p className="mt-1 text-sm font-medium text-[#F5A623]">
               {profit.promotion_name}
             </p>
+          )}
+          {promotions.some(
+            (p) =>
+              (p.discount_target || "product") === "shipping" &&
+              p.discount_type === "percent" &&
+              Number(p.discount_value) >= 100
+          ) && (
+            <p className="mt-1 text-sm font-bold text-[#00A650]">Frete grátis</p>
+          )}
+          {gifts.some((g) => g.gift_data?.id) && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {gifts.map((link, i) => {
+                const g = link.gift_data as
+                  | {
+                      id?: string;
+                      name?: string;
+                      image_url?: string;
+                      image_urls?: string[];
+                    }
+                  | undefined;
+                if (!g?.id) return null;
+                const img = g.image_url || g.image_urls?.[0];
+                return (
+                  <div
+                    key={String(g.id) + i}
+                    className="flex items-center gap-2 rounded-full border border-[#A855F7]/40 bg-[#A855F7]/10 py-1 pl-1 pr-3"
+                  >
+                    <div className="h-8 w-8 overflow-hidden rounded-full border-2 border-[#A855F7] bg-white">
+                      {img ? (
+                        <img src={img} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-[#A855F7] text-xs text-white">
+                          +
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-xs">
+                      <p className="font-medium text-gray-800">
+                        {String(g.name || "Brinde")}
+                      </p>
+                      <p className="font-bold text-[#A855F7]">Grátis</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
           {product.description && (
             <p className="mt-3 text-sm text-gray-600 whitespace-pre-wrap md:text-base">

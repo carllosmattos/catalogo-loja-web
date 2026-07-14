@@ -9,6 +9,7 @@ import type {
   StoreSettings,
 } from "@/types";
 import { DEFAULT_SETTINGS, mergeBrandSettings } from "@/lib/branding";
+import { toGiftPreviews } from "@/lib/deals";
 import { mergeSizes } from "@/lib/sizes";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -74,7 +75,8 @@ export async function fetchProductsPage(params: {
   }
 
   const { data, count } = await query.range(start, end);
-  const products = await attachSizes(data || []);
+  const withSizes = await attachSizes(data || []);
+  const products = await attachGifts(withSizes);
   return { products, total: count || products.length };
 }
 
@@ -114,6 +116,40 @@ async function attachSizes(products: Product[]): Promise<Product[]> {
     sizes: grouped[product.id]
       ? mergeSizes(grouped[product.id] as never)
       : mergeSizes(null),
+  }));
+}
+
+async function attachGifts(products: Product[]): Promise<Product[]> {
+  if (!products.length) return products;
+  const supabase = await getClient();
+  if (!supabase) return products;
+  const ids = products.map((p) => p.id);
+  const { data } = await supabase
+    .from("product_gifts")
+    .select("product_id, quantity_per_sale, gifts(id, name, image_url, image_urls, active)")
+    .in("product_id", ids);
+
+  const byProduct: Record<string, NonNullable<Product["linked_gifts"]>> = {};
+  for (const row of data || []) {
+    const pid = String(row.product_id);
+    const rawGift = row.gifts;
+    const gift = Array.isArray(rawGift) ? rawGift[0] : rawGift;
+    if (!gift) continue;
+    const previews = toGiftPreviews([
+      {
+        gift_id: gift.id,
+        quantity_per_sale: row.quantity_per_sale,
+        gifts: gift,
+      },
+    ]);
+    if (!previews.length) continue;
+    if (!byProduct[pid]) byProduct[pid] = [];
+    byProduct[pid].push(...previews);
+  }
+
+  return products.map((p) => ({
+    ...p,
+    linked_gifts: byProduct[p.id] || [],
   }));
 }
 
