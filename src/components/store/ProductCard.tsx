@@ -43,24 +43,31 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
   return (
     <Link
       href={`/produto/${product.id}`}
-      className="group animate-fade-in overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-black/5 transition-shadow hover:shadow-md"
+      className="group animate-fade-in rounded-2xl bg-white shadow-sm ring-1 ring-black/5 transition-shadow hover:shadow-md"
     >
-      <div className="relative aspect-[3/4] overflow-hidden bg-[var(--color-accent)]">
-        {image ? (
-          <img
-            src={image}
-            alt={product.name}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-gray-300">
-            Sem foto
-          </div>
-        )}
+      <div className="relative aspect-[3/4] overflow-visible bg-[var(--color-accent)]">
+        <div className="absolute inset-0 overflow-hidden rounded-t-2xl">
+          {image ? (
+            <img
+              src={image}
+              alt={product.name}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-gray-300">
+              Sem foto
+            </div>
+          )}
+          {soldOut && (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-sm font-semibold text-white">
+              Esgotado
+            </span>
+          )}
+        </div>
 
         {profit.promotion_name && profit.desconto > 0 && (
           <span
-            className="absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
+            className="absolute left-2 top-2 z-10 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
             style={{ backgroundColor: PROMO_YELLOW }}
           >
             Promo
@@ -68,28 +75,30 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
         )}
 
         {giftPreview && (
-          <div className="absolute bottom-2 right-2 flex flex-col items-end gap-0.5">
+          <div className="absolute bottom-2 right-2 z-20 flex flex-col items-end gap-0.5">
             <div
-              className="relative h-[70px] w-[70px] overflow-hidden rounded-full border-2 bg-white shadow-md"
+              className="relative h-[70px] w-[70px] origin-bottom-right rounded-full border-2 bg-white shadow-md transition-transform duration-200 ease-out hover:z-30 hover:scale-[1.65]"
               style={{ borderColor: GIFT_LILAC }}
               title={`Brinde: ${giftPreview.name}`}
             >
-              {giftPreview.image_url ? (
-                <img
-                  src={giftPreview.image_url}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div
-                  className="flex h-full w-full items-center justify-center text-sm font-bold text-white"
-                  style={{ backgroundColor: GIFT_LILAC }}
-                >
-                  +
-                </div>
-              )}
+              <div className="h-full w-full overflow-hidden rounded-full">
+                {giftPreview.image_url ? (
+                  <img
+                    src={giftPreview.image_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div
+                    className="flex h-full w-full items-center justify-center text-sm font-bold text-white"
+                    style={{ backgroundColor: GIFT_LILAC }}
+                  >
+                    +
+                  </div>
+                )}
+              </div>
               <span
-                className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase text-white"
+                className="absolute -bottom-0.5 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase text-white shadow-sm"
                 style={{ backgroundColor: GIFT_LILAC }}
               >
                 Grátis
@@ -104,12 +113,6 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
               </span>
             )}
           </div>
-        )}
-
-        {soldOut && (
-          <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-sm font-semibold text-white">
-            Esgotado
-          </span>
         )}
       </div>
 
