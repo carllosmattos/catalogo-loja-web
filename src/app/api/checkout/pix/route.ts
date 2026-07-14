@@ -7,7 +7,7 @@ import type { Customer } from "@/types";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { customerId, cart, shippingMethod } = body;
+    const { customerId, cart, shippingMethod, couponCode } = body;
     if (!customerId || !cart?.length) {
       return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
     }
@@ -36,7 +36,12 @@ export async function POST(request: Request) {
     ) as Record<string, NonNullable<Awaited<ReturnType<typeof fetchProduct>>>>;
 
     const lines = await buildLinesFromCart(cart, validProducts);
-    const result = await startPixCheckout(customer as Customer, lines, method);
+    const result = await startPixCheckout(
+      customer as Customer,
+      lines,
+      method,
+      typeof couponCode === "string" ? couponCode : null
+    );
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(

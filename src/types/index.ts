@@ -23,6 +23,8 @@ export interface StoreSettings {
   sender_state?: string;
   default_package_weight_kg?: number;
   melhor_envio_enabled?: boolean;
+  /** Dias da semana de coleta/envio: 0=Dom … 6=Sáb */
+  shipping_dispatch_weekdays?: number[];
 }
 
 export interface Category {
@@ -83,6 +85,30 @@ export interface StoreBanner {
   sort_order: number;
 }
 
+export interface Coupon {
+  id: string;
+  code: string;
+  title: string;
+  image_url: string | null;
+  discount_type: "percent" | "fixed";
+  discount_value: number;
+  max_uses: number;
+  used_count: number;
+  active: boolean;
+}
+
+export interface CouponValidation {
+  ok: boolean;
+  error?: string;
+  coupon_id?: string;
+  code?: string;
+  title?: string;
+  discount_type?: "percent" | "fixed";
+  discount_value?: number;
+  discount_amount?: number;
+  image_url?: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -98,6 +124,7 @@ export interface Customer {
   address_city: string;
   address_state: string;
   points: number;
+  auth_user_id?: string | null;
 }
 
 export interface CartItem {
@@ -124,6 +151,8 @@ export interface ShippingQuote {
   delivery_range?: string | null;
   company?: string | null;
   service?: string | null;
+  dispatch_weekday?: number | null;
+  dispatch_wait_days?: number | null;
 }
 
 export type PaymentStatus =

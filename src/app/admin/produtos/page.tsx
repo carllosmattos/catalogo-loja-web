@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { SIZES, SIZE_LABELS } from "@/lib/sizes";
 import { formatCurrency } from "@/lib/utils";
 import type { Product, Category } from "@/types";
@@ -19,6 +20,8 @@ export default function AdminProdutosPage() {
     purchase_freight: 0,
     sale_price: 0,
     sale_freight: 0,
+    image_urls: [] as string[],
+    new_image: "",
     sizes: Object.fromEntries(SIZES.map((s) => [s, 0])),
   });
   const [message, setMessage] = useState("");
@@ -56,9 +59,28 @@ export default function AdminProdutosPage() {
     load();
   }, []);
 
+  function resetForm() {
+    setForm({
+      name: "",
+      description: "",
+      category_id: "",
+      purchase_price: 0,
+      purchase_freight: 0,
+      sale_price: 0,
+      sale_freight: 0,
+      image_urls: [],
+      new_image: "",
+      sizes: Object.fromEntries(SIZES.map((s) => [s, 0])),
+    });
+  }
+
   async function saveProduct(e: React.FormEvent) {
     e.preventDefault();
     setMessage("");
+    const images = [...form.image_urls];
+    if (form.new_image && !images.includes(form.new_image)) {
+      images.push(form.new_image);
+    }
     const payload = {
       name: form.name,
       description: form.description,
@@ -68,6 +90,7 @@ export default function AdminProdutosPage() {
       purchase_freight: form.purchase_freight,
       sale_price: form.sale_price,
       sale_freight: form.sale_freight,
+      image_urls: images,
       active: true,
     };
     let productId = editing;
@@ -89,16 +112,7 @@ export default function AdminProdutosPage() {
     }
     setMessage("Salvo!");
     setEditing(null);
-    setForm({
-      name: "",
-      description: "",
-      category_id: "",
-      purchase_price: 0,
-      purchase_freight: 0,
-      sale_price: 0,
-      sale_freight: 0,
-      sizes: Object.fromEntries(SIZES.map((s) => [s, 0])),
-    });
+    resetForm();
     load();
   }
 
@@ -112,6 +126,8 @@ export default function AdminProdutosPage() {
       purchase_freight: Number(p.purchase_freight),
       sale_price: Number(p.sale_price),
       sale_freight: Number(p.sale_freight),
+      image_urls: p.image_urls || [],
+      new_image: "",
       sizes: Object.fromEntries(
         SIZES.map((s) => [s, p.sizes?.find((x) => x.size === s)?.stock ?? 0])
       ),
@@ -184,10 +200,51 @@ export default function AdminProdutosPage() {
                 ))}
               </div>
             </div>
+            <div className="space-y-2">
+              <ImageUploadField
+                label="Adicionar foto"
+                folder="products"
+                value={form.new_image}
+                onChange={(url) => {
+                  if (!url) {
+                    setForm((f) => ({ ...f, new_image: "" }));
+                    return;
+                  }
+                  setForm((f) => ({
+                    ...f,
+                    new_image: "",
+                    image_urls: f.image_urls.includes(url)
+                      ? f.image_urls
+                      : [...f.image_urls, url],
+                  }));
+                }}
+              />
+              {form.image_urls.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {form.image_urls.map((url) => (
+                    <div key={url} className="relative">
+                      <img src={url} alt="" className="h-16 w-16 rounded object-cover ring-1 ring-black/5" />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            image_urls: f.image_urls.filter((u) => u !== url),
+                          }))
+                        }
+                        className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-xs text-white"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex gap-2">
               <AdminButton type="submit">Salvar</AdminButton>
               {editing && (
-                <AdminButton type="button" variant="secondary" onClick={() => setEditing(null)}>
+                <AdminButton type="button" variant="secondary" onClick={() => { setEditing(null); resetForm(); }}>
                   Cancelar
                 </AdminButton>
               )}
@@ -197,8 +254,11 @@ export default function AdminProdutosPage() {
         <AdminCard title="Lista">
           <ul className="max-h-[600px] space-y-2 overflow-y-auto">
             {products.map((p) => (
-              <li key={p.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
-                <div>
+              <li key={p.id} className="flex items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+                {p.image_urls?.[0] && (
+                  <img src={p.image_urls[0]} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
+                )}
+                <div className="min-w-0 flex-1">
                   <p className="font-medium">{p.name}</p>
                   <p className="text-gray-400">{formatCurrency(Number(p.sale_price))} · {p.active ? "Ativo" : "Inativo"}</p>
                 </div>

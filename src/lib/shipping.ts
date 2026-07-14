@@ -1,6 +1,11 @@
 import type { ShippingQuote } from "@/types";
 import { addressFieldsFromCustomer, type AddressFields } from "@/lib/address";
 import {
+  formatDispatchDeadline,
+  nextDispatchDate,
+  parseDispatchWeekdays,
+} from "@/lib/dispatch";
+import {
   getValidMelhorEnvioAccessToken,
   melhorEnvioUserAgent,
 } from "@/lib/melhor-envio";
@@ -12,6 +17,31 @@ export interface MelhorEnvioQuote {
   deliveryRange: string | null;
   company: string | null;
   service: string | null;
+}
+
+function applyDispatchWindow(
+  quote: ShippingQuote,
+  settings: Record<string, unknown>
+): ShippingQuote {
+  const weekdays = parseDispatchWeekdays(settings.shipping_dispatch_weekdays);
+  if (!weekdays.length) return quote;
+
+  const next = nextDispatchDate(new Date(), weekdays);
+  if (!next) return quote;
+
+  const transportDays = quote.delivery_days ?? null;
+  return {
+    ...quote,
+    delivery_days:
+      transportDays != null ? next.waitDays + transportDays : next.waitDays,
+    delivery_range: formatDispatchDeadline(
+      next.waitDays,
+      transportDays,
+      next.weekday
+    ),
+    dispatch_weekday: next.weekday,
+    dispatch_wait_days: next.waitDays,
+  };
 }
 
 export async function resolveShippingZone(
@@ -180,22 +210,28 @@ export async function calculateShipping(
     };
   }
   if (zoneType === "free") {
-    return {
-      amount: 0,
-      zone_type: zoneType,
-      label: label || "Frete grátis",
-      blocked: false,
-      source: "zone",
-    };
+    return applyDispatchWindow(
+      {
+        amount: 0,
+        zone_type: zoneType,
+        label: label || "Frete grátis",
+        blocked: false,
+        source: "zone",
+      },
+      settings
+    );
   }
   if (zoneType === "paid") {
-    return {
-      amount: Number(zone.freight_amount) || 0,
-      zone_type: zoneType,
-      label: label || "Frete da região",
-      blocked: false,
-      source: "zone",
-    };
+    return applyDispatchWindow(
+      {
+        amount: Number(zone.freight_amount) || 0,
+        zone_type: zoneType,
+        label: label || "Frete da região",
+        blocked: false,
+        source: "zone",
+      },
+      settings
+    );
   }
 
   if (settings.melhor_envio_enabled) {
@@ -214,26 +250,32 @@ export async function calculateShipping(
       const parts = ["Melhor Envio"];
       if (me.company) parts.push(me.company);
       if (me.service) parts.push(me.service);
-      return {
-        amount: me.amount,
-        zone_type: "quoted",
-        label: parts.join(" · "),
-        blocked: false,
-        source: "melhor_envio",
-        delivery_days: me.deliveryDays,
-        delivery_range: me.deliveryRange,
-        company: me.company,
-        service: me.service,
-      };
+      return applyDispatchWindow(
+        {
+          amount: me.amount,
+          zone_type: "quoted",
+          label: parts.join(" · "),
+          blocked: false,
+          source: "melhor_envio",
+          delivery_days: me.deliveryDays,
+          delivery_range: me.deliveryRange,
+          company: me.company,
+          service: me.service,
+        },
+        settings
+      );
     }
   }
 
   const fallback = fallbackFreight(lines);
-  return {
-    amount: fallback,
-    zone_type: "fallback",
-    label: fallback > 0 ? "Frete do produto" : "",
-    blocked: false,
-    source: "product",
-  };
+  return applyDispatchWindow(
+    {
+      amount: fallback,
+      zone_type: "fallback",
+      label: fallback > 0 ? "Frete do produto" : "",
+      blocked: false,
+      source: "product",
+    },
+    settings
+  );
 }

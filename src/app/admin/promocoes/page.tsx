@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import type { Promotion } from "@/types";
 
 export default function AdminPromocoesPage() {
@@ -30,7 +31,7 @@ export default function AdminPromocoesPage() {
     await supabase.from("promotions").insert({
       ...form,
       product_ids: [],
-      image_urls: [],
+      image_urls: form.banner_url ? [form.banner_url] : [],
     });
     setForm({ name: "", discount_type: "percent", discount_value: 10, applies_to: "all", active: true, show_banner: false, banner_url: "" });
     load();
@@ -56,7 +57,12 @@ export default function AdminPromocoesPage() {
               </select>
             </div>
             <AdminInput label="Valor do desconto" type="number" step="0.01" value={form.discount_value} onChange={(e) => setForm({ ...form, discount_value: Number(e.target.value) })} />
-            <AdminInput label="URL do banner (opcional)" value={form.banner_url} onChange={(e) => setForm({ ...form, banner_url: e.target.value })} />
+            <ImageUploadField
+              label="Banner (opcional)"
+              folder="promotions"
+              value={form.banner_url}
+              onChange={(url) => setForm({ ...form, banner_url: url, show_banner: Boolean(url) })}
+            />
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.show_banner} onChange={(e) => setForm({ ...form, show_banner: e.target.checked })} />
               Exibir banner

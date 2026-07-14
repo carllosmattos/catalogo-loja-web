@@ -8,6 +8,7 @@ import {
   ShoppingCart,
   CreditCard,
   Truck,
+  Ticket,
   LogOut,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -16,6 +17,7 @@ const NAV = [
   { href: "/admin/produtos", label: "Produtos", icon: Package },
   { href: "/admin/promocoes", label: "Promoções", icon: Tag },
   { href: "/admin/brindes", label: "Brindes", icon: Gift },
+  { href: "/admin/cupons", label: "Cupons", icon: Ticket },
   { href: "/admin/loja", label: "Loja", icon: Store },
   { href: "/admin/lucro", label: "Lucro", icon: TrendingUp },
   { href: "/admin/vendas", label: "Vendas", icon: ShoppingCart },

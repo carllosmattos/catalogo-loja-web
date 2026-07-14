@@ -4,6 +4,10 @@ import {
   fetchStoreSettings,
 } from "@/lib/catalog";
 import {
+  redeemCouponServer,
+  validateCouponServer,
+} from "@/lib/coupons";
+import {
   appBaseUrl,
   createPixCheckout,
   paymentsEnabled,
@@ -91,7 +95,8 @@ export async function buildLinesFromCart(
 export async function startPixCheckout(
   customer: Customer,
   lines: Awaited<ReturnType<typeof buildLinesFromCart>>,
-  shippingMethod: "delivery" | "uber" = "delivery"
+  shippingMethod: "delivery" | "uber" = "delivery",
+  couponCode?: string | null
 ) {
   if (!paymentsEnabled()) {
     throw new Error("Pagamentos online desativados.");
@@ -113,11 +118,34 @@ export async function startPixCheckout(
     );
   }
 
+  const subtotal = lines.reduce(
+    (s, l) => s + Number(l.preco_final_line || 0),
+    0
+  );
+  let discountAmount = 0;
+  let appliedCode = "";
+  if (couponCode?.trim()) {
+    const coupon = await validateCouponServer(
+      couponCode.trim(),
+      customer.id,
+      subtotal
+    );
+    if (!coupon.ok) {
+      throw new Error(coupon.error || "Cupom inválido");
+    }
+    discountAmount = Math.min(
+      Number(coupon.discount_amount) || 0,
+      subtotal
+    );
+    appliedCode = String(coupon.code || couponCode.trim());
+  }
+
   const supabase = await createClient();
   const { data: created, error } = await supabase.rpc("create_checkout_order", {
     p_customer_id: customer.id,
     p_items: lines,
     p_shipping_amount: Math.round(shipping.amount * 100) / 100,
+    p_discount_amount: Math.round(discountAmount * 100) / 100,
   });
   if (error) throw new Error(error.message);
   const orderData = Array.isArray(created) ? created[0] : created;
@@ -127,6 +155,15 @@ export async function startPixCheckout(
   const trackingToken = String(orderData.tracking_token);
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
+
+  if (appliedCode && discountAmount > 0) {
+    await redeemCouponServer(
+      appliedCode,
+      customer.id,
+      orderId,
+      discountAmount
+    );
+  }
 
   const now = new Date();
   now.setMinutes(now.getMinutes() + PIX_EXPIRY_MINUTES);
@@ -177,6 +214,8 @@ export async function startPixCheckout(
     ticket_url: result.ticketUrl,
     provider_payment_id: result.providerPaymentId,
     total,
+    discount_amount: discountAmount,
+    coupon_code: appliedCode || null,
     shipping_amount: shipping.amount,
     shipping_label: shipping.label,
     shipping_method: shippingMethod,

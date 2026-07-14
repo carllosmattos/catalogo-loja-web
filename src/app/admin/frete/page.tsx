@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
 import { BRAZILIAN_STATES } from "@/lib/address";
+import { WEEKDAY_OPTIONS, parseDispatchWeekdays } from "@/lib/dispatch";
 import type { ShippingZone } from "@/types";
 
 export default function AdminFretePage() {
@@ -80,8 +81,19 @@ export default function AdminFretePage() {
       sender_state: settings.sender_state,
       default_package_weight_kg: settings.default_package_weight_kg,
       melhor_envio_enabled: settings.melhor_envio_enabled,
+      shipping_dispatch_weekdays: parseDispatchWeekdays(
+        settings.shipping_dispatch_weekdays
+      ),
     }).eq("id", settings.id);
     load();
+  }
+
+  function toggleDispatchDay(day: number) {
+    const current = parseDispatchWeekdays(settings.shipping_dispatch_weekdays);
+    const next = current.includes(day)
+      ? current.filter((d) => d !== day)
+      : [...current, day].sort((a, b) => a - b);
+    setSettings({ ...settings, shipping_dispatch_weekdays: next });
   }
 
   async function disconnectMe() {
@@ -158,6 +170,34 @@ export default function AdminFretePage() {
             <input type="checkbox" checked={Boolean(settings.melhor_envio_enabled)} onChange={(e) => setSettings({ ...settings, melhor_envio_enabled: e.target.checked })} />
             Melhor Envio ativo na cotação do carrinho
           </label>
+          <div className="md:col-span-2 space-y-2">
+            <p className="text-sm font-medium">Dias de coleta / envio</p>
+            <p className="text-xs text-gray-500">
+              O prazo do cliente = dias até o próximo dia de envio + prazo do Melhor Envio.
+              Se marcar vários dias, usa o mais próximo da data da compra.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {WEEKDAY_OPTIONS.map((w) => {
+                const selected = parseDispatchWeekdays(
+                  settings.shipping_dispatch_weekdays
+                ).includes(w.value);
+                return (
+                  <button
+                    key={w.value}
+                    type="button"
+                    onClick={() => toggleDispatchDay(w.value)}
+                    className={`rounded-full px-3 py-1.5 text-sm ${
+                      selected
+                        ? "bg-[var(--color-primary)] text-white"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {w.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <AdminButton type="submit">Salvar remetente</AdminButton>
         </form>
       </AdminCard>

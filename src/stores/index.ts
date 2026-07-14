@@ -1,14 +1,24 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { CartItem, Customer, ProductSize, ShippingMethod } from "@/types";
+import type {
+  CartItem,
+  CouponValidation,
+  Customer,
+  ProductSize,
+  ShippingMethod,
+} from "@/types";
 
 interface CartState {
   items: CartItem[];
   shippingMethod: ShippingMethod;
+  couponCode: string;
+  coupon: CouponValidation | null;
   addItem: (item: Omit<CartItem, "quantity"> & { quantity?: number }) => void;
   updateQuantity: (productId: string, size: ProductSize, quantity: number) => void;
   removeItem: (productId: string, size: ProductSize) => void;
   setShippingMethod: (method: ShippingMethod) => void;
+  setCoupon: (code: string, coupon: CouponValidation | null) => void;
+  clearCoupon: () => void;
   clear: () => void;
   totalItems: () => number;
 }
@@ -18,6 +28,8 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       items: [],
       shippingMethod: "delivery",
+      couponCode: "",
+      coupon: null,
       addItem: (item) => {
         const qty = item.quantity || 1;
         const existing = get().items.find(
@@ -60,7 +72,15 @@ export const useCartStore = create<CartState>()(
         });
       },
       setShippingMethod: (method) => set({ shippingMethod: method }),
-      clear: () => set({ items: [], shippingMethod: "delivery" }),
+      setCoupon: (code, coupon) => set({ couponCode: code, coupon }),
+      clearCoupon: () => set({ couponCode: "", coupon: null }),
+      clear: () =>
+        set({
+          items: [],
+          shippingMethod: "delivery",
+          couponCode: "",
+          coupon: null,
+        }),
       totalItems: () => get().items.reduce((s, i) => s + i.quantity, 0),
     }),
     { name: "catalog-cart" }

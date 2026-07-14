@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminInput, AdminButton } from "@/components/admin/AdminUI";
+import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { DEFAULT_SETTINGS } from "@/lib/branding";
 import type { StoreSettings } from "@/types";
 
@@ -66,17 +67,29 @@ export default function AdminLojaPage() {
           <AdminInput label="Cor primária" type="color" value={settings.primary_color} onChange={(e) => setSettings({ ...settings, primary_color: e.target.value })} />
           <AdminInput label="Cor secundária" type="color" value={settings.secondary_color} onChange={(e) => setSettings({ ...settings, secondary_color: e.target.value })} />
           <AdminInput label="Cor de fundo" type="color" value={settings.accent_color} onChange={(e) => setSettings({ ...settings, accent_color: e.target.value })} />
-          <AdminInput label="URL da logo" value={settings.logo_url || ""} onChange={(e) => setSettings({ ...settings, logo_url: e.target.value })} />
+          <div className="md:col-span-2">
+            <ImageUploadField
+              label="Logo"
+              folder="branding"
+              value={settings.logo_url || ""}
+              onChange={(url) => setSettings({ ...settings, logo_url: url })}
+            />
+          </div>
           <div className="md:col-span-2">
             <AdminButton type="submit">Salvar</AdminButton>
           </div>
         </form>
       </AdminCard>
       <AdminCard title="Banners do carrossel" className="mt-6">
-        <div className="flex gap-2">
-          <AdminInput label="" placeholder="URL da imagem" value={newBannerUrl} onChange={(e) => setNewBannerUrl(e.target.value)} className="flex-1" />
-          <AdminButton type="button" onClick={addBanner} className="self-end">Adicionar</AdminButton>
-        </div>
+        <ImageUploadField
+          label="Novo banner"
+          folder="banners"
+          value={newBannerUrl}
+          onChange={setNewBannerUrl}
+        />
+        <AdminButton type="button" onClick={addBanner} className="mt-3" disabled={!newBannerUrl}>
+          Adicionar banner
+        </AdminButton>
         <ul className="mt-4 space-y-2">
           {banners.map((b) => (
             <li key={b.id} className="flex items-center gap-3 rounded-lg border p-2">

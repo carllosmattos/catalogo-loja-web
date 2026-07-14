@@ -30,6 +30,8 @@ export function CheckoutClient({
   const clear = useCartStore((s) => s.clear);
   const shippingMethod = useCartStore((s) => s.shippingMethod);
   const setShippingMethod = useCartStore((s) => s.setShippingMethod);
+  const couponCode = useCartStore((s) => s.couponCode);
+  const coupon = useCartStore((s) => s.coupon);
   const customer = useCustomerStore((s) => s.customer);
   const [loading, setLoading] = useState(false);
   const [pixResult, setPixResult] = useState<Record<string, unknown> | null>(
@@ -43,6 +45,7 @@ export function CheckoutClient({
     (s, i) => s + (Number(i.sale_price) + Number(i.sale_freight)) * i.quantity,
     0
   );
+  const discountAmount = coupon?.ok ? Number(coupon.discount_amount) || 0 : 0;
 
   useEffect(() => {
     if (!items.length || !customer?.id) {
@@ -78,7 +81,7 @@ export function CheckoutClient({
 
   const freightAmount =
     shippingMethod === "uber" ? 0 : Number(shipping?.amount) || 0;
-  const estimatedTotal = subtotal + freightAmount;
+  const estimatedTotal = Math.max(subtotal - discountAmount, 0) + freightAmount;
 
   async function handlePix() {
     if (!customer?.id) {
@@ -95,6 +98,7 @@ export function CheckoutClient({
           customerId: customer.id,
           cart: items,
           shippingMethod,
+          couponCode: coupon?.ok ? couponCode : null,
         }),
       });
       const data = await res.json();
@@ -248,6 +252,11 @@ export function CheckoutClient({
 
           <div className="mb-4 space-y-1 text-sm text-gray-600">
             <p>Subtotal: {formatCurrency(subtotal)}</p>
+            {discountAmount > 0 && (
+              <p className="text-green-700">
+                Cupom {couponCode}: −{formatCurrency(discountAmount)}
+              </p>
+            )}
             <p>
               Frete:{" "}
               {shippingMethod === "uber"
