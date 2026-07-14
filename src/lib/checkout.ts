@@ -6,7 +6,7 @@ import {
 import {
   redeemCouponServer,
   validateCouponServer,
-} from "@/lib/coupons";
+} from "@/lib/coupons-server";
 import {
   appBaseUrl,
   createPixCheckout,
