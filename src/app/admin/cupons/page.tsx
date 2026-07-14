@@ -55,6 +55,7 @@ export default function AdminCuponsPage() {
     image_url: "",
     discount_type: "percent" as "percent" | "fixed",
     discount_value: 10,
+    discount_target: "product" as "product" | "shipping",
     max_uses: 50,
     active: true,
   });
@@ -67,6 +68,17 @@ export default function AdminCuponsPage() {
     () => buildCouponCode(tipo, suffix),
     [tipo, suffix]
   );
+
+  useEffect(() => {
+    if (promoKind === "FRETE") {
+      setForm((f) => ({
+        ...f,
+        discount_target: "shipping",
+        discount_type: "percent",
+        discount_value: 100,
+      }));
+    }
+  }, [promoKind]);
 
   async function load() {
     const { data } = await supabase
@@ -89,10 +101,17 @@ export default function AdminCuponsPage() {
     }
     const { error } = await supabase.from("coupons").insert({
       code,
-      title: form.title.trim() || code,
+      title:
+        form.title.trim() ||
+        (form.discount_target === "shipping"
+          ? form.discount_type === "percent" && form.discount_value >= 100
+            ? "Frete grátis"
+            : "Desconto no frete"
+          : ""),
       image_url: form.image_url || "",
       discount_type: form.discount_type,
       discount_value: form.discount_value,
+      discount_target: form.discount_target,
       max_uses: Math.max(0, Number(form.max_uses) || 0),
       active: form.active,
       used_count: 0,
@@ -106,6 +125,7 @@ export default function AdminCuponsPage() {
       image_url: "",
       discount_type: "percent",
       discount_value: 10,
+      discount_target: "product",
       max_uses: 50,
       active: true,
     });
@@ -195,6 +215,22 @@ export default function AdminCuponsPage() {
               onChange={(url) => setForm({ ...form, image_url: url })}
             />
             <div>
+              <label className="text-sm font-medium">Abate em</label>
+              <select
+                value={form.discount_target}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    discount_target: e.target.value as "product" | "shipping",
+                  })
+                }
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+              >
+                <option value="product">Produtos (subtotal)</option>
+                <option value="shipping">Frete somente</option>
+              </select>
+            </div>
+            <div>
               <label className="text-sm font-medium">Tipo de desconto</label>
               <select
                 value={form.discount_type}
@@ -264,7 +300,7 @@ export default function AdminCuponsPage() {
                 <div className="min-w-0 flex-1">
                   <p className="font-mono font-medium">{c.code}</p>
                   <p className="truncate text-gray-400">
-                    {c.title} ·{" "}
+                    {c.discount_target === "shipping" ? "Frete" : "Produto"} ·{" "}
                     {c.discount_type === "percent"
                       ? `${c.discount_value}%`
                       : formatCurrency(Number(c.discount_value))}{" "}

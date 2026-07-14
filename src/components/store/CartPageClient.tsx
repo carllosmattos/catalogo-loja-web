@@ -16,6 +16,9 @@ interface CartPageClientProps {
 
 interface ShippingState {
   amount: number;
+  amount_before_discount?: number;
+  shipping_promo_discount?: number;
+  shipping_promo_name?: string | null;
   label: string;
   blocked: boolean;
   delivery_range?: string | null;
@@ -47,7 +50,27 @@ export function CartPageClient({ settings }: CartPageClientProps) {
     (s, i) => s + (Number(i.sale_price) + Number(i.sale_freight)) * i.quantity,
     0
   );
-  const discountAmount = coupon?.ok ? Number(coupon.discount_amount) || 0 : 0;
+  const freightAfterPromo =
+    shippingMethod === "uber"
+      ? 0
+      : shipping?.blocked
+        ? 0
+        : Number(shipping?.amount) || 0;
+  const shippingPromoDiscount =
+    shippingMethod === "uber"
+      ? 0
+      : Number(shipping?.shipping_promo_discount) || 0;
+  const productDiscount =
+    coupon?.ok && coupon.discount_target !== "shipping"
+      ? Number(coupon.discount_amount) || 0
+      : 0;
+  const shippingCouponDiscount =
+    coupon?.ok && coupon.discount_target === "shipping"
+      ? Math.min(Number(coupon.discount_amount) || 0, freightAfterPromo)
+      : 0;
+  const freightAmount = Math.max(0, freightAfterPromo - shippingCouponDiscount);
+  const couponDiscountDisplay = productDiscount + shippingCouponDiscount;
+  const total = Math.max(subtotal - productDiscount, 0) + freightAmount;
 
   useEffect(() => {
     if (!items.length || !customer?.id) {
@@ -76,14 +99,26 @@ export function CartPageClient({ settings }: CartPageClientProps) {
         }
         if (!r.ok || data?.error != null || typeof data?.amount !== "number") {
           setShipping(null);
-          setShipError(data?.error ? String(data.error) : "Não foi possível calcular o frete.");
+          setShipError(
+            data?.error ? String(data.error) : "Não foi possível calcular o frete."
+          );
           return;
         }
         setShipping({
           amount: Number(data.amount) || 0,
+          amount_before_discount:
+            data.amount_before_discount != null
+              ? Number(data.amount_before_discount)
+              : Number(data.amount) || 0,
+          shipping_promo_discount: Number(data.shipping_promo_discount) || 0,
+          shipping_promo_name: data.shipping_promo_name
+            ? String(data.shipping_promo_name)
+            : null,
           label: String(data.label || ""),
           blocked: Boolean(data.blocked),
-          delivery_range: data.delivery_range ? String(data.delivery_range) : null,
+          delivery_range: data.delivery_range
+            ? String(data.delivery_range)
+            : null,
           source: data.source ? String(data.source) : undefined,
         });
       })
@@ -97,7 +132,12 @@ export function CartPageClient({ settings }: CartPageClientProps) {
   useEffect(() => {
     if (!coupon?.ok || !couponCode) return;
     let cancelled = false;
-    validateCouponClient(couponCode, customer?.id, subtotal).then((result) => {
+    validateCouponClient(
+      couponCode,
+      customer?.id,
+      subtotal,
+      freightAfterPromo
+    ).then((result) => {
       if (cancelled) return;
       if (result.ok) setCoupon(String(result.code || couponCode), result);
       else clearCoupon();
@@ -105,12 +145,8 @@ export function CartPageClient({ settings }: CartPageClientProps) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- só revalida quando subtotal/customer mudam
-  }, [subtotal, customer?.id]);
-
-  const freightAmount =
-    shippingMethod === "uber" ? 0 : shipping?.amount || 0;
-  const total = Math.max(subtotal - discountAmount, 0) + freightAmount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal, customer?.id, freightAfterPromo]);
 
   function selectMethod(method: ShippingMethod) {
     setShippingMethod(method);
@@ -123,7 +159,8 @@ export function CartPageClient({ settings }: CartPageClientProps) {
       const result = await validateCouponClient(
         couponInput,
         customer?.id,
-        subtotal
+        subtotal,
+        freightAfterPromo
       );
       if (!result.ok) {
         clearCoupon();
@@ -311,9 +348,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                 {coupon?.ok && (
                   <div className="flex items-center justify-between text-xs text-green-700">
                     <span>
-                      {coupon.code}
-                      {coupon.title ? ` — ${coupon.title}` : ""} (−
-                      {formatCurrency(discountAmount)})
+                      {coupon.code} (−{formatCurrency(couponDiscountDisplay)})
+                      {coupon.discount_target === "shipping"
+                        ? " · frete"
+                        : ""}
                     </span>
                     <button
                       type="button"
@@ -331,10 +369,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                   <p className="text-xs text-red-600">{couponError}</p>
                 )}
               </div>
-              {discountAmount > 0 && (
+              {productDiscount > 0 && (
                 <div className="flex justify-between text-green-700">
-                  <span>Desconto</span>
-                  <span>−{formatCurrency(discountAmount)}</span>
+                  <span>Desconto (produtos)</span>
+                  <span>−{formatCurrency(productDiscount)}</span>
                 </div>
               )}
               {customer && (
@@ -351,6 +389,19 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                   </span>
                 </div>
               )}
+              {(shippingPromoDiscount > 0 || shippingCouponDiscount > 0) &&
+                shippingMethod === "delivery" &&
+                !shipping?.blocked && (
+                  <p className="text-xs text-green-700">
+                    {shippingPromoDiscount > 0 &&
+                      `Promo frete${shipping?.shipping_promo_name ? ` (${shipping.shipping_promo_name})` : ""}: −${formatCurrency(shippingPromoDiscount)}`}
+                    {shippingPromoDiscount > 0 &&
+                      shippingCouponDiscount > 0 &&
+                      " · "}
+                    {shippingCouponDiscount > 0 &&
+                      `Cupom frete: −${formatCurrency(shippingCouponDiscount)}`}
+                  </p>
+                )}
               {shippingMethod === "delivery" &&
                 shipping?.delivery_range &&
                 !shipping.blocked && (

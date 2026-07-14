@@ -13,7 +13,7 @@ import {
   paymentsEnabled,
   webhookNotificationUrl,
 } from "@/lib/payments";
-import { calculateProfit } from "@/lib/profit";
+import { applyShippingPromotion, calculateProfit } from "@/lib/profit";
 import { calculateShipping } from "@/lib/shipping";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCpf } from "@/lib/utils";
@@ -122,30 +122,50 @@ export async function startPixCheckout(
     (s, l) => s + Number(l.preco_final_line || 0),
     0
   );
-  let discountAmount = 0;
+
+  let shippingGross = Math.round(shipping.amount * 100) / 100;
+  let shippingPromoDiscount = 0;
+  let shippingPromoName: string | null = null;
+  if (shippingMethod === "delivery" && shippingGross > 0) {
+    const promotions = await fetchActivePromotions();
+    const shippingPromo = applyShippingPromotion(shippingGross, promotions);
+    shippingPromoDiscount = shippingPromo.discount;
+    shippingPromoName = shippingPromo.name;
+  }
+  const shippingAfterPromo = Math.max(0, shippingGross - shippingPromoDiscount);
+
+  let productDiscount = 0;
+  let shippingCouponDiscount = 0;
   let appliedCode = "";
   if (couponCode?.trim()) {
     const coupon = await validateCouponServer(
       couponCode.trim(),
       customer.id,
-      subtotal
+      subtotal,
+      shippingAfterPromo
     );
     if (!coupon.ok) {
       throw new Error(coupon.error || "Cupom inválido");
     }
-    discountAmount = Math.min(
-      Number(coupon.discount_amount) || 0,
-      subtotal
-    );
     appliedCode = String(coupon.code || couponCode.trim());
+    const amt = Number(coupon.discount_amount) || 0;
+    if (coupon.discount_target === "shipping") {
+      shippingCouponDiscount = Math.min(amt, shippingAfterPromo);
+    } else {
+      productDiscount = Math.min(amt, subtotal);
+    }
   }
+
+  const shippingDiscountTotal = shippingPromoDiscount + shippingCouponDiscount;
+  const couponRedeemAmount = productDiscount + shippingCouponDiscount;
 
   const supabase = await createClient();
   const { data: created, error } = await supabase.rpc("create_checkout_order", {
     p_customer_id: customer.id,
     p_items: lines,
-    p_shipping_amount: Math.round(shipping.amount * 100) / 100,
-    p_discount_amount: Math.round(discountAmount * 100) / 100,
+    p_shipping_amount: shippingGross,
+    p_discount_amount: Math.round(productDiscount * 100) / 100,
+    p_shipping_discount: Math.round(shippingDiscountTotal * 100) / 100,
   });
   if (error) throw new Error(error.message);
   const orderData = Array.isArray(created) ? created[0] : created;
@@ -156,12 +176,12 @@ export async function startPixCheckout(
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
 
-  if (appliedCode && discountAmount > 0) {
+  if (appliedCode && couponRedeemAmount > 0) {
     await redeemCouponServer(
       appliedCode,
       customer.id,
       orderId,
-      discountAmount
+      couponRedeemAmount
     );
   }
 
@@ -214,9 +234,11 @@ export async function startPixCheckout(
     ticket_url: result.ticketUrl,
     provider_payment_id: result.providerPaymentId,
     total,
-    discount_amount: discountAmount,
+    discount_amount: productDiscount,
+    shipping_discount_amount: shippingDiscountTotal,
+    shipping_promo_name: shippingPromoName,
     coupon_code: appliedCode || null,
-    shipping_amount: shipping.amount,
+    shipping_amount: Math.max(0, shippingGross - shippingDiscountTotal),
     shipping_label: shipping.label,
     shipping_method: shippingMethod,
     delivery_range: shipping.delivery_range || null,

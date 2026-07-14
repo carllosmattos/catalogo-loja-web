@@ -68,7 +68,10 @@ export interface Promotion {
   name: string;
   discount_type: "percent" | "fixed";
   discount_value: number;
+  /** Escopo de produtos: todos ou selecionados */
   applies_to: "all" | "selected";
+  /** Onde abate: preço do produto ou frete cotado */
+  discount_target?: "product" | "shipping";
   product_ids: string[];
   starts_at: string | null;
   ends_at: string | null;
@@ -92,6 +95,7 @@ export interface Coupon {
   image_url: string | null;
   discount_type: "percent" | "fixed";
   discount_value: number;
+  discount_target?: "product" | "shipping";
   max_uses: number;
   used_count: number;
   active: boolean;
@@ -106,6 +110,7 @@ export interface CouponValidation {
   discount_type?: "percent" | "fixed";
   discount_value?: number;
   discount_amount?: number;
+  discount_target?: "product" | "shipping";
   image_url?: string;
 }
 

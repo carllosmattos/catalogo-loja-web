@@ -27,6 +27,7 @@ export function applyPromotion(
   let bestName: string | null = null;
   const pid = String(productId);
   for (const promo of promotions) {
+    if ((promo.discount_target || "product") !== "product") continue;
     const productIds = (promo.product_ids || []).map(String);
     const applies =
       promo.applies_to === "all" || productIds.includes(pid);
@@ -41,6 +42,34 @@ export function applyPromotion(
     }
   }
   return [bestDiscount, bestName];
+}
+
+/** Melhor promoção ativa de frete (abate só o frete cotado). */
+export function applyShippingPromotion(
+  shippingAmount: number,
+  promotions: Promotion[]
+): { discount: number; name: string | null } {
+  const base = Math.max(Number(shippingAmount) || 0, 0);
+  let bestDiscount = 0;
+  let bestName: string | null = null;
+  if (base <= 0) return { discount: 0, name: null };
+
+  for (const promo of promotions) {
+    if ((promo.discount_target || "product") !== "shipping") continue;
+    if (promo.active === false) continue;
+    const discount =
+      promo.discount_type === "percent"
+        ? base * (Number(promo.discount_value) / 100)
+        : Math.min(Number(promo.discount_value), base);
+    if (discount > bestDiscount) {
+      bestDiscount = discount;
+      bestName = promo.name;
+    }
+  }
+  return {
+    discount: Math.round(bestDiscount * 100) / 100,
+    name: bestName,
+  };
 }
 
 export function calculateProfit(

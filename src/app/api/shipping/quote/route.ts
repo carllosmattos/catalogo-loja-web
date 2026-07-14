@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { fetchProduct, fetchStoreSettings } from "@/lib/catalog";
+import {
+  fetchActivePromotions,
+  fetchProduct,
+  fetchStoreSettings,
+} from "@/lib/catalog";
+import { applyShippingPromotion } from "@/lib/profit";
 import { calculateShipping } from "@/lib/shipping";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -18,7 +23,6 @@ export async function POST(request: Request) {
 
     const method = shippingMethod === "uber" ? "uber" : "delivery";
 
-    // Service role: tabela customers tem RLS só para authenticated
     const supabase = await createServiceClient();
     const { data: customer } = await supabase
       .from("customers")
@@ -49,7 +53,33 @@ export async function POST(request: Request) {
       settings as unknown as Record<string, unknown>,
       method
     );
-    return NextResponse.json(quote);
+
+    if (quote.blocked || method === "uber") {
+      return NextResponse.json({
+        ...quote,
+        amount_before_discount: quote.amount,
+        shipping_promo_discount: 0,
+        shipping_promo_name: null,
+      });
+    }
+
+    const promotions = await fetchActivePromotions();
+    const shippingPromo = applyShippingPromotion(quote.amount, promotions);
+    const amount = Math.max(0, quote.amount - shippingPromo.discount);
+
+    return NextResponse.json({
+      ...quote,
+      amount,
+      amount_before_discount: quote.amount,
+      shipping_promo_discount: shippingPromo.discount,
+      shipping_promo_name: shippingPromo.name,
+      label:
+        shippingPromo.discount > 0
+          ? quote.label
+            ? `${quote.label} · promo frete`
+            : "Frete com promoção"
+          : quote.label,
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Erro" },

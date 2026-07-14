@@ -6,13 +6,15 @@ import { createServiceClient } from "@/lib/supabase/server";
 export async function validateCouponServer(
   code: string,
   customerId: string | null | undefined,
-  subtotal: number
+  subtotal: number,
+  shipping = 0
 ): Promise<CouponValidation> {
   const supabase = await createServiceClient();
   const { data, error } = await supabase.rpc("validate_coupon", {
     p_code: code,
     p_customer_id: customerId || null,
     p_subtotal: subtotal,
+    p_shipping: shipping,
   });
   if (error) return { ok: false, error: error.message };
   return unwrapCoupon(data);

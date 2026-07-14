@@ -17,6 +17,8 @@ interface CheckoutClientProps {
 
 interface ShippingState {
   amount: number;
+  shipping_promo_discount?: number;
+  shipping_promo_name?: string | null;
   label: string;
   blocked: boolean;
   delivery_range?: string | null;
@@ -45,7 +47,6 @@ export function CheckoutClient({
     (s, i) => s + (Number(i.sale_price) + Number(i.sale_freight)) * i.quantity,
     0
   );
-  const discountAmount = coupon?.ok ? Number(coupon.discount_amount) || 0 : 0;
 
   useEffect(() => {
     if (!items.length || !customer?.id) {
@@ -69,6 +70,10 @@ export function CheckoutClient({
         }
         setShipping({
           amount: Number(data.amount) || 0,
+          shipping_promo_discount: Number(data.shipping_promo_discount) || 0,
+          shipping_promo_name: data.shipping_promo_name
+            ? String(data.shipping_promo_name)
+            : null,
           label: String(data.label || ""),
           blocked: Boolean(data.blocked),
           delivery_range: data.delivery_range
@@ -79,9 +84,19 @@ export function CheckoutClient({
       .catch(() => setShipping(null));
   }, [items, customer?.id, shippingMethod]);
 
-  const freightAmount =
+  const freightAfterPromo =
     shippingMethod === "uber" ? 0 : Number(shipping?.amount) || 0;
-  const estimatedTotal = Math.max(subtotal - discountAmount, 0) + freightAmount;
+  const productDiscount =
+    coupon?.ok && coupon.discount_target !== "shipping"
+      ? Number(coupon.discount_amount) || 0
+      : 0;
+  const shippingCouponDiscount =
+    coupon?.ok && coupon.discount_target === "shipping"
+      ? Math.min(Number(coupon.discount_amount) || 0, freightAfterPromo)
+      : 0;
+  const freightAmount = Math.max(0, freightAfterPromo - shippingCouponDiscount);
+  const estimatedTotal =
+    Math.max(subtotal - productDiscount, 0) + freightAmount;
 
   async function handlePix() {
     if (!customer?.id) {
@@ -252,9 +267,9 @@ export function CheckoutClient({
 
           <div className="mb-4 space-y-1 text-sm text-gray-600">
             <p>Subtotal: {formatCurrency(subtotal)}</p>
-            {discountAmount > 0 && (
+            {productDiscount > 0 && (
               <p className="text-green-700">
-                Cupom {couponCode}: −{formatCurrency(discountAmount)}
+                Cupom {couponCode}: −{formatCurrency(productDiscount)}
               </p>
             )}
             <p>
@@ -265,6 +280,19 @@ export function CheckoutClient({
                   ? "indisponível"
                   : formatCurrency(freightAmount)}
             </p>
+            {(Number(shipping?.shipping_promo_discount) > 0 ||
+              shippingCouponDiscount > 0) &&
+              shippingMethod === "delivery" && (
+                <p className="text-green-700">
+                  {Number(shipping?.shipping_promo_discount) > 0 &&
+                    `Promo frete: −${formatCurrency(Number(shipping?.shipping_promo_discount))}`}
+                  {Number(shipping?.shipping_promo_discount) > 0 &&
+                    shippingCouponDiscount > 0 &&
+                    " · "}
+                  {shippingCouponDiscount > 0 &&
+                    `Cupom frete: −${formatCurrency(shippingCouponDiscount)}`}
+                </p>
+              )}
             {shippingMethod === "delivery" && shipping?.delivery_range && (
               <p>Prazo: {shipping.delivery_range}</p>
             )}

@@ -6,6 +6,8 @@ export function unwrapCoupon(data: unknown): CouponValidation {
   if (!raw || typeof raw !== "object") {
     return { ok: false, error: "Cupom inválido" };
   }
+  const target =
+    raw.discount_target === "shipping" ? "shipping" : "product";
   return {
     ok: Boolean(raw.ok),
     error: raw.error ? String(raw.error) : undefined,
@@ -17,6 +19,7 @@ export function unwrapCoupon(data: unknown): CouponValidation {
       raw.discount_value != null ? Number(raw.discount_value) : undefined,
     discount_amount:
       raw.discount_amount != null ? Number(raw.discount_amount) : undefined,
+    discount_target: target,
     image_url: raw.image_url ? String(raw.image_url) : undefined,
   };
 }
@@ -25,13 +28,15 @@ export function unwrapCoupon(data: unknown): CouponValidation {
 export async function validateCouponClient(
   code: string,
   customerId: string | null | undefined,
-  subtotal: number
+  subtotal: number,
+  shipping = 0
 ): Promise<CouponValidation> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("validate_coupon", {
     p_code: code,
     p_customer_id: customerId || null,
     p_subtotal: subtotal,
+    p_shipping: shipping,
   });
   if (error) return { ok: false, error: error.message };
   return unwrapCoupon(data);
