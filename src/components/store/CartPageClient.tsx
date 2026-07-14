@@ -25,8 +25,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
   const { items, updateQuantity, removeItem, shippingMethod, setShippingMethod } =
     useCartStore();
   const customer = useCustomerStore((s) => s.customer);
+  const setCustomer = useCustomerStore((s) => s.setCustomer);
   const [shipping, setShipping] = useState<ShippingState | null>(null);
   const [loadingShip, setLoadingShip] = useState(false);
+  const [shipError, setShipError] = useState("");
 
   const subtotal = items.reduce(
     (s, i) => s + (Number(i.sale_price) + Number(i.sale_freight)) * i.quantity,
@@ -36,9 +38,11 @@ export function CartPageClient({ settings }: CartPageClientProps) {
   useEffect(() => {
     if (!items.length || !customer?.id) {
       setShipping(null);
+      setShipError("");
       return;
     }
     setLoadingShip(true);
+    setShipError("");
     fetch("/api/shipping/quote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -50,8 +54,15 @@ export function CartPageClient({ settings }: CartPageClientProps) {
     })
       .then(async (r) => {
         const data = await r.json();
+        if (r.status === 404) {
+          setShipping(null);
+          setCustomer(null);
+          setShipError("Sessão expirada. Entre de novo em Conta.");
+          return;
+        }
         if (!r.ok || data?.error != null || typeof data?.amount !== "number") {
           setShipping(null);
+          setShipError(data?.error ? String(data.error) : "Não foi possível calcular o frete.");
           return;
         }
         setShipping({
@@ -62,9 +73,12 @@ export function CartPageClient({ settings }: CartPageClientProps) {
           source: data.source ? String(data.source) : undefined,
         });
       })
-      .catch(() => setShipping(null))
+      .catch(() => {
+        setShipping(null);
+        setShipError("Erro ao calcular frete.");
+      })
       .finally(() => setLoadingShip(false));
-  }, [items, customer?.id, shippingMethod]);
+  }, [items, customer?.id, shippingMethod, setCustomer]);
 
   const freightAmount =
     shippingMethod === "uber" ? 0 : shipping?.amount || 0;
@@ -209,6 +223,14 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                       </p>
                     )}
                   </button>
+                  {shipError && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      {shipError}{" "}
+                      <Link href="/conta" className="underline font-medium">
+                        Ir para Conta
+                      </Link>
+                    </p>
+                  )}
                 </div>
               )}
 

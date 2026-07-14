@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchProduct, fetchStoreSettings } from "@/lib/catalog";
 import { calculateShipping } from "@/lib/shipping";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   try {
@@ -18,12 +18,13 @@ export async function POST(request: Request) {
 
     const method = shippingMethod === "uber" ? "uber" : "delivery";
 
-    const supabase = await createClient();
+    // Service role: tabela customers tem RLS só para authenticated
+    const supabase = await createServiceClient();
     const { data: customer } = await supabase
       .from("customers")
       .select("*")
       .eq("id", customerId)
-      .single();
+      .maybeSingle();
     if (!customer) {
       return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
     }

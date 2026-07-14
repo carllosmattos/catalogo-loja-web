@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildLinesFromCart, startPixCheckout } from "@/lib/checkout";
 import { fetchProduct } from "@/lib/catalog";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/server";
 import type { Customer } from "@/types";
 
 export async function POST(request: Request) {
@@ -14,12 +14,12 @@ export async function POST(request: Request) {
 
     const method = shippingMethod === "uber" ? "uber" : "delivery";
 
-    const supabase = await createClient();
+    const supabase = await createServiceClient();
     const { data: customer } = await supabase
       .from("customers")
       .select("*")
       .eq("id", customerId)
-      .single();
+      .maybeSingle();
     if (!customer) {
       return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
     }
