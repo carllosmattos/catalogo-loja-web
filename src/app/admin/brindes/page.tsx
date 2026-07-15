@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminInput, AdminButton, AdminFormActions } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
+import { giftPreviewImage } from "@/lib/deals";
 import type { Gift } from "@/types";
 
 export default function AdminBrindesPage() {
@@ -34,6 +35,7 @@ export default function AdminBrindesPage() {
       purchase_freight: form.purchase_freight,
       sale_markup: form.sale_markup,
       active: true,
+      image_url: form.image_url || null,
       image_urls: form.image_url ? [form.image_url] : [],
     });
     setForm({
@@ -71,17 +73,24 @@ export default function AdminBrindesPage() {
         </AdminCard>
         <AdminCard title="Lista">
           <ul className="space-y-2">
-            {gifts.map((g) => (
-              <li key={g.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
-                {g.image_urls?.[0] && (
-                  <img src={g.image_urls[0]} alt="" className="h-10 w-10 rounded object-cover" />
-                )}
-                <div>
-                  <p className="font-medium">{g.name}</p>
-                  <p className="text-gray-400">Estoque: {g.stock}</p>
-                </div>
-              </li>
-            ))}
+            {gifts.map((g) => {
+              const img = giftPreviewImage(g);
+              return (
+                <li key={g.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
+                  {img ? (
+                    <img src={img} alt="" className="h-10 w-10 rounded object-cover" />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded bg-gray-100 text-[10px] text-gray-400">
+                      sem foto
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-medium">{g.name}</p>
+                    <p className="text-gray-400">Estoque: {g.stock}</p>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </AdminCard>
       </div>

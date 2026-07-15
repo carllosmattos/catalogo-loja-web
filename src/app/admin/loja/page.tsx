@@ -56,6 +56,17 @@ export default function AdminLojaPage() {
     load();
   }
 
+  async function toggleBanner(id: string, active: boolean) {
+    await supabase.from("store_banners").update({ active }).eq("id", id);
+    load();
+  }
+
+  async function deleteBanner(id: string) {
+    if (!confirm("Excluir este banner?")) return;
+    await supabase.from("store_banners").delete().eq("id", id);
+    load();
+  }
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-[var(--color-primary)]">Loja</h1>
@@ -94,9 +105,35 @@ export default function AdminLojaPage() {
         </AdminButton>
         <ul className="mt-4 space-y-2">
           {banners.map((b) => (
-            <li key={b.id} className="flex items-center gap-3 rounded-lg border p-2">
+            <li
+              key={b.id}
+              className={`flex flex-wrap items-center gap-3 rounded-lg border p-2 ${
+                b.active ? "" : "opacity-60"
+              }`}
+            >
               <img src={b.image_url} alt="" className="h-12 w-20 rounded object-cover" />
-              <span className="flex-1 truncate text-xs text-gray-500">{b.image_url}</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-xs text-gray-500">{b.image_url}</span>
+                <span className="text-xs font-medium text-gray-400">
+                  {b.active ? "Ativo no site" : "Inativo"}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => toggleBanner(b.id, !b.active)}
+                >
+                  {b.active ? "Inativar" : "Ativar"}
+                </AdminButton>
+                <AdminButton
+                  type="button"
+                  variant="danger"
+                  onClick={() => deleteBanner(b.id)}
+                >
+                  Excluir
+                </AdminButton>
+              </div>
             </li>
           ))}
         </ul>

@@ -316,10 +316,23 @@ export default function AdminFretePage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <AdminCard title="Nova zona">
+        <AdminCard title="Regra de frete por região">
+          <p className="mb-4 text-sm text-gray-600">
+            Aqui você define uma regra <strong>manual</strong> para um lugar
+            (estado, cidade ou bairro): frete grátis, valor fixo ou não entregar.
+            Se o endereço do cliente bater nessa regra, ela vale{" "}
+            <strong>no lugar</strong> da cotação Melhor Envio. Só quando{" "}
+            <strong>nenhuma</strong> regra bater é que o site usa Melhor Envio
+            (se estiver ativo) ou o frete do produto.
+          </p>
+          <p className="mb-4 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            Exemplos: “SP inteiro grátis”, “Campinas R$ 12”, “não entrega no
+            Interior de MG”. Quanto mais específico (bairro &gt; cidade &gt;
+            estado), maior a prioridade.
+          </p>
           <form onSubmit={saveZone} className="space-y-3">
             <div>
-              <label className="text-sm font-medium">Tipo</label>
+              <label className="text-sm font-medium">Tipo da regra</label>
               <select
                 value={form.zone_type}
                 onChange={(e) =>
@@ -330,13 +343,13 @@ export default function AdminFretePage() {
                 }
                 className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
               >
-                <option value="free">Grátis</option>
-                <option value="paid">Pago</option>
-                <option value="blocked">Bloqueado</option>
+                <option value="free">Frete grátis</option>
+                <option value="paid">Valor fixo</option>
+                <option value="blocked">Não entrega (bloqueado)</option>
               </select>
             </div>
             <div>
-              <label className="text-sm font-medium">Escopo</label>
+              <label className="text-sm font-medium">Abrangência</label>
               <select
                 value={form.scope}
                 onChange={(e) =>
@@ -347,7 +360,7 @@ export default function AdminFretePage() {
                 }
                 className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
               >
-                <option value="state">Estado</option>
+                <option value="state">Estado inteiro</option>
                 <option value="city">Cidade</option>
                 <option value="neighborhood">Bairro</option>
               </select>
@@ -357,45 +370,83 @@ export default function AdminFretePage() {
               value={form.state}
               onChange={(e) => setForm({ ...form, state: e.target.value })}
             />
+            {(form.scope === "city" || form.scope === "neighborhood") && (
+              <AdminInput
+                label="Cidade"
+                value={form.city}
+                onChange={(e) => setForm({ ...form, city: e.target.value })}
+              />
+            )}
+            {form.scope === "neighborhood" && (
+              <AdminInput
+                label="Bairro"
+                value={form.neighborhood}
+                onChange={(e) =>
+                  setForm({ ...form, neighborhood: e.target.value })
+                }
+              />
+            )}
+            {form.zone_type === "paid" && (
+              <AdminInput
+                label="Valor do frete (R$)"
+                type="number"
+                step="0.01"
+                value={form.freight_amount}
+                onChange={(e) =>
+                  setForm({ ...form, freight_amount: Number(e.target.value) })
+                }
+              />
+            )}
             <AdminInput
-              label="Cidade"
-              value={form.city}
-              onChange={(e) => setForm({ ...form, city: e.target.value })}
-            />
-            <AdminInput
-              label="Valor frete"
-              type="number"
-              step="0.01"
-              value={form.freight_amount}
-              onChange={(e) =>
-                setForm({ ...form, freight_amount: Number(e.target.value) })
-              }
-            />
-            <AdminInput
-              label="Rótulo"
+              label="Nome da regra (opcional)"
+              placeholder="Ex.: Frete grátis São Paulo"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
             />
             <AdminFormActions>
-              <AdminButton type="submit">Adicionar zona</AdminButton>
+              <AdminButton type="submit">Adicionar regra</AdminButton>
             </AdminFormActions>
           </form>
         </AdminCard>
-        <AdminCard title="Zonas cadastradas">
-          <ul className="space-y-2 text-sm">
-            {zones.map((z) => (
-              <li key={z.id} className="rounded-lg border p-3">
-                <p className="font-medium">
-                  {z.label || z.zone_type} — {z.state}
-                  {z.city ? `/${z.city}` : ""}
-                </p>
-                <p className="text-gray-400">
-                  {z.zone_type} · R${" "}
-                  {Number(z.freight_amount || 0).toFixed(2)}
-                </p>
-              </li>
-            ))}
-          </ul>
+        <AdminCard title="Regras cadastradas">
+          {zones.length === 0 ? (
+            <p className="text-sm text-gray-400">
+              Nenhuma regra ainda. Sem regras, o frete vem do Melhor Envio ou do
+              produto.
+            </p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {zones.map((z) => {
+                const typeLabel =
+                  z.zone_type === "free"
+                    ? "Grátis"
+                    : z.zone_type === "blocked"
+                      ? "Bloqueado"
+                      : `R$ ${Number(z.freight_amount || 0).toFixed(2)}`;
+                const where = [z.state, z.city, z.neighborhood]
+                  .filter(Boolean)
+                  .join(" / ");
+                return (
+                  <li key={z.id} className="rounded-lg border p-3">
+                    <p className="font-medium">
+                      {z.label || typeLabel} — {where || "Brasil"}
+                    </p>
+                    <p className="text-gray-400">
+                      {z.scope === "state"
+                        ? "Estado"
+                        : z.scope === "city"
+                          ? "Cidade"
+                          : z.scope === "neighborhood"
+                            ? "Bairro"
+                            : z.scope}{" "}
+                      · {typeLabel}
+                      {!z.active ? " · inativa" : ""}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </AdminCard>
       </div>
     </div>

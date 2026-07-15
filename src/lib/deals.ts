@@ -31,9 +31,14 @@ export function giftPreviewImage(gift: {
   image_url?: string | null;
   image_urls?: string[] | null;
 }): string | null {
-  if (gift.image_url) return gift.image_url;
+  const single = (gift.image_url || "").trim();
+  if (single) return single;
   const urls = gift.image_urls || [];
-  return urls[0] || null;
+  for (const u of urls) {
+    const s = (u || "").trim();
+    if (s) return s;
+  }
+  return null;
 }
 
 export function toGiftPreviews(
