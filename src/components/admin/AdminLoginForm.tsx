@@ -35,7 +35,7 @@ export function AdminLoginForm({ logoUrl, storeName }: AdminLoginFormProps) {
   }
 
   return (
-    <div className="flex min-h-dvh w-full items-center justify-center bg-[var(--color-accent)] px-4">
+    <div className="flex min-h-dvh w-full items-center justify-center px-4 py-8">
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg"

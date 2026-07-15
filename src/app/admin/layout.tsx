@@ -40,8 +40,11 @@ export default async function AdminLayout({
   const storeName = settings?.store_name || "Admin";
 
   if (!user) {
+    // fixed inset-0 cobre o body (bg-white) e elimina a “borda” branca no login
     return (
-      <div className="min-h-dvh bg-[var(--color-accent)]">{children}</div>
+      <div className="fixed inset-0 overflow-y-auto bg-[var(--color-accent)]">
+        {children}
+      </div>
     );
   }
 
