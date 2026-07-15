@@ -7,6 +7,15 @@ export function buildWhatsappUrl(whatsappNumber: string, message: string): strin
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
+/** Mensagem padrão de atendimento (home / float). */
+export function buildAttendMessage(storeName: string): string {
+  return [
+    `Olá! Vi o site da ${storeName} e gostaria de atendimento personalizado.`,
+    "",
+    "Pode me ajudar a escolher uma peça ou tirar algumas dúvidas?",
+  ].join("\n");
+}
+
 function customerLines(customer: Record<string, string> | null | undefined): string[] {
   if (!customer) return [];
   const lines: string[] = [];

@@ -1,5 +1,5 @@
 import type { StoreSettings } from "@/types";
-import { buildWhatsappUrl } from "@/lib/whatsapp";
+import { buildAttendMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 
 interface WhatsAppFloatProps {
   settings: StoreSettings;
@@ -8,8 +8,10 @@ interface WhatsAppFloatProps {
 
 export function WhatsAppFloat({ settings, message }: WhatsAppFloatProps) {
   if (!settings.whatsapp_number) return null;
-  const defaultMsg = `Olá! Vi o catálogo da ${settings.store_name} e gostaria de mais informações.`;
-  const url = buildWhatsappUrl(settings.whatsapp_number, message || defaultMsg);
+  const url = buildWhatsappUrl(
+    settings.whatsapp_number,
+    message || buildAttendMessage(settings.store_name)
+  );
 
   return (
     <a

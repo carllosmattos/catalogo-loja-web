@@ -10,6 +10,7 @@ import { ProductCard } from "@/components/store/ProductCard";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { STORE_MAIN, PRODUCT_GRID } from "@/lib/store-layout";
+import { buildAttendMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 
 export default async function HomePage() {
   const [settings, promotions, banners, { products }] = await Promise.all([
@@ -77,7 +78,10 @@ export default async function HomePage() {
               Prefere atendimento personalizado?
             </p>
             <a
-              href={`https://wa.me/${settings.whatsapp_number.replace(/\D/g, "")}`}
+              href={buildWhatsappUrl(
+                settings.whatsapp_number,
+                buildAttendMessage(settings.store_name)
+              )}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-2 inline-flex items-center gap-2 rounded-full bg-[#25D366] px-6 py-2.5 text-sm font-semibold text-white"
