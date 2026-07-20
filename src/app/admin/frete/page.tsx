@@ -84,10 +84,45 @@ export default function AdminFretePage() {
   async function loadMeStatus() {
     try {
       const res = await fetch("/api/admin/melhor-envio/status");
-      if (!res.ok) return;
-      setMeStatus(await res.json());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Mesmo com erro (ex.: 401), mostra o redirect URI esperado
+        setMeStatus({
+          configured: false,
+          connected: false,
+          expiresAt: null,
+          expiresInDays: null,
+          redirectUri:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/api/admin/melhor-envio/callback`
+              : "",
+        });
+        if (res.status === 401) {
+          setMeError("Sessão admin expirada. Faça login de novo.");
+        }
+        return;
+      }
+      setMeStatus({
+        configured: Boolean(data.configured),
+        connected: Boolean(data.connected),
+        expiresAt: data.expiresAt || null,
+        expiresInDays:
+          data.expiresInDays != null ? Number(data.expiresInDays) : null,
+        redirectUri:
+          data.redirectUri ||
+          `${window.location.origin}/api/admin/melhor-envio/callback`,
+      });
     } catch {
-      // ignore
+      setMeStatus({
+        configured: false,
+        connected: false,
+        expiresAt: null,
+        expiresInDays: null,
+        redirectUri:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/api/admin/melhor-envio/callback`
+            : "",
+      });
     }
   }
 
@@ -169,12 +204,52 @@ export default function AdminFretePage() {
             </p>
           )}
           {!meStatus?.configured ? (
-            <p className="text-amber-700">
-              Configure no Vercel: <code>MELHOR_ENVIO_CLIENT_ID</code>,{" "}
-              <code>MELHOR_ENVIO_CLIENT_SECRET</code> e{" "}
-              <code>APP_BASE_URL</code>. No app do Melhor Envio, use o redirect
-              abaixo.
-            </p>
+            <div className="space-y-2 rounded-xl bg-amber-50 px-3 py-3 text-amber-800">
+              <p className="font-medium">Melhor Envio ainda não configurado no Vercel</p>
+              <ol className="list-decimal space-y-1 pl-4 text-sm">
+                <li>
+                  Em{" "}
+                  <a
+                    href="https://melhorenvio.com.br/painel/gerenciar/tokens"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    Melhor Envio → Tokens / Apps
+                  </a>
+                  , crie um app OAuth (produção ou sandbox).
+                </li>
+                <li>
+                  Cole no app a <strong>Redirect URI</strong> mostrada abaixo
+                  (tem que ser idêntica).
+                </li>
+                <li>
+                  No Vercel → Environment Variables, adicione:
+                  <ul className="mt-1 list-disc pl-4">
+                    <li>
+                      <code>MELHOR_ENVIO_CLIENT_ID</code>
+                    </li>
+                    <li>
+                      <code>MELHOR_ENVIO_CLIENT_SECRET</code>
+                    </li>
+                    <li>
+                      <code>APP_BASE_URL</code> ={" "}
+                      <code>https://lm-moda-feminina.vercel.app</code>
+                    </li>
+                    <li>
+                      <code>MELHOR_ENVIO_SANDBOX</code> ={" "}
+                      <code>true</code> só se o app for sandbox
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  Salve e faça <strong>Redeploy</strong> no Vercel (obrigatório).
+                </li>
+                <li>
+                  Volte aqui e clique em <strong>Conectar Melhor Envio</strong>.
+                </li>
+              </ol>
+            </div>
           ) : meStatus.connected ? (
             <p className="text-gray-600">
               Conectado
@@ -184,15 +259,18 @@ export default function AdminFretePage() {
             </p>
           ) : (
             <p className="text-gray-600">
-              App configurado. Clique em conectar e autorize no Melhor Envio.
+              App configurado no Vercel. Clique em conectar e autorize no Melhor
+              Envio.
             </p>
           )}
-          {meStatus?.redirectUri && (
-            <p className="break-all rounded-lg bg-gray-50 p-2 text-xs text-gray-500">
-              Redirect URI (cole no app Melhor Envio):{" "}
-              <strong>{meStatus.redirectUri}</strong>
-            </p>
-          )}
+          <p className="break-all rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
+            Redirect URI (cole no app Melhor Envio, sem barra no final):
+            <br />
+            <strong>
+              {meStatus?.redirectUri ||
+                "https://lm-moda-feminina.vercel.app/api/admin/melhor-envio/callback"}
+            </strong>
+          </p>
           <AdminFormActions>
             <a
               href="/api/admin/melhor-envio/connect"
