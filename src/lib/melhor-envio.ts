@@ -30,6 +30,31 @@ export function melhorEnvioClientConfigured(): boolean {
   );
 }
 
+/** Diagnóstico sem expor segredos. */
+export function melhorEnvioConfigDiagnostic(): {
+  configured: boolean;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasAppBaseUrl: boolean;
+  sandbox: boolean;
+  redirectUri: string;
+} {
+  const hasClientId = Boolean(process.env.MELHOR_ENVIO_CLIENT_ID?.trim());
+  const hasClientSecret = Boolean(
+    process.env.MELHOR_ENVIO_CLIENT_SECRET?.trim()
+  );
+  return {
+    configured: hasClientId && hasClientSecret,
+    hasClientId,
+    hasClientSecret,
+    hasAppBaseUrl: Boolean(
+      process.env.APP_BASE_URL?.trim() || process.env.VERCEL_URL
+    ),
+    sandbox: (process.env.MELHOR_ENVIO_SANDBOX || "").trim() === "true",
+    redirectUri: melhorEnvioRedirectUri(),
+  };
+}
+
 export function melhorEnvioRedirectUri(): string {
   const explicit = process.env.MELHOR_ENVIO_REDIRECT_URI?.trim();
   if (explicit) return explicit;

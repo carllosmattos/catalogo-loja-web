@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   clearMelhorEnvioTokens,
   getMelhorEnvioConnectionStatus,
-  melhorEnvioClientConfigured,
+  melhorEnvioConfigDiagnostic,
   melhorEnvioRedirectUri,
 } from "@/lib/melhor-envio";
 
@@ -12,13 +12,17 @@ export async function GET() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const diagnostic = melhorEnvioConfigDiagnostic();
+
   if (!user) {
     return NextResponse.json(
       {
         error: "Não autenticado",
-        configured: melhorEnvioClientConfigured(),
+        ...diagnostic,
         connected: false,
-        redirectUri: melhorEnvioRedirectUri(),
+        expiresAt: null,
+        expiresInDays: null,
       },
       { status: 401 }
     );
@@ -27,7 +31,8 @@ export async function GET() {
   const status = await getMelhorEnvioConnectionStatus();
   return NextResponse.json({
     ...status,
-    redirectUri: melhorEnvioRedirectUri(),
+    ...diagnostic,
+    redirectUri: diagnostic.redirectUri || melhorEnvioRedirectUri(),
   });
 }
 

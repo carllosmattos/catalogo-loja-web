@@ -52,7 +52,12 @@ export default function AdminFretePage() {
     expiresAt: string | null;
     expiresInDays: number | null;
     redirectUri: string;
+    hasClientId?: boolean;
+    hasClientSecret?: boolean;
+    hasAppBaseUrl?: boolean;
+    sandbox?: boolean;
   } | null>(null);
+  const [meStatusLoaded, setMeStatusLoaded] = useState(false);
   const [meMsg, setMeMsg] = useState("");
   const [meError, setMeError] = useState("");
   const [form, setForm] = useState<ShippingZone>({
@@ -85,33 +90,25 @@ export default function AdminFretePage() {
     try {
       const res = await fetch("/api/admin/melhor-envio/status");
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // Mesmo com erro (ex.: 401), mostra o redirect URI esperado
-        setMeStatus({
-          configured: false,
-          connected: false,
-          expiresAt: null,
-          expiresInDays: null,
-          redirectUri:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/api/admin/melhor-envio/callback`
-              : "",
-        });
-        if (res.status === 401) {
-          setMeError("Sessão admin expirada. Faça login de novo.");
-        }
-        return;
-      }
+      const fallbackUri =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/api/admin/melhor-envio/callback`
+          : "";
       setMeStatus({
         configured: Boolean(data.configured),
         connected: Boolean(data.connected),
         expiresAt: data.expiresAt || null,
         expiresInDays:
           data.expiresInDays != null ? Number(data.expiresInDays) : null,
-        redirectUri:
-          data.redirectUri ||
-          `${window.location.origin}/api/admin/melhor-envio/callback`,
+        redirectUri: data.redirectUri || fallbackUri,
+        hasClientId: Boolean(data.hasClientId),
+        hasClientSecret: Boolean(data.hasClientSecret),
+        hasAppBaseUrl: Boolean(data.hasAppBaseUrl),
+        sandbox: Boolean(data.sandbox),
       });
+      if (res.status === 401) {
+        setMeError("Sessão admin expirada. Faça login de novo.");
+      }
     } catch {
       setMeStatus({
         configured: false,
@@ -122,7 +119,13 @@ export default function AdminFretePage() {
           typeof window !== "undefined"
             ? `${window.location.origin}/api/admin/melhor-envio/callback`
             : "",
+        hasClientId: false,
+        hasClientSecret: false,
+        hasAppBaseUrl: false,
+        sandbox: false,
       });
+    } finally {
+      setMeStatusLoaded(true);
     }
   }
 
@@ -203,48 +206,41 @@ export default function AdminFretePage() {
               {meMsg}
             </p>
           )}
-          {!meStatus?.configured ? (
+          {!meStatusLoaded ? (
+            <p className="text-sm text-gray-400">Verificando configuração…</p>
+          ) : !meStatus?.configured ? (
             <div className="space-y-2 rounded-xl bg-amber-50 px-3 py-3 text-amber-800">
-              <p className="font-medium">Melhor Envio ainda não configurado no Vercel</p>
+              <p className="font-medium">
+                Vercel ainda não enxerga Client ID/Secret
+              </p>
+              <ul className="list-disc space-y-1 pl-4 text-sm">
+                <li>
+                  CLIENT_ID:{" "}
+                  {meStatus?.hasClientId ? "encontrado" : "não encontrado"}
+                </li>
+                <li>
+                  CLIENT_SECRET:{" "}
+                  {meStatus?.hasClientSecret
+                    ? "encontrado"
+                    : "não encontrado"}
+                </li>
+                <li>
+                  APP_BASE_URL:{" "}
+                  {meStatus?.hasAppBaseUrl ? "ok" : "faltando (usa VERCEL_URL)"}
+                </li>
+              </ul>
+              <p className="text-sm">
+                Confira os nomes exatos (sem espaço):{" "}
+                <code>MELHOR_ENVIO_CLIENT_ID</code> e{" "}
+                <code>MELHOR_ENVIO_CLIENT_SECRET</code>, marcados para{" "}
+                <strong>Production</strong>, e faça{" "}
+                <strong>Redeploy</strong> depois de salvar.
+              </p>
               <ol className="list-decimal space-y-1 pl-4 text-sm">
                 <li>
-                  Em{" "}
-                  <a
-                    href="https://melhorenvio.com.br/painel/gerenciar/tokens"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline"
-                  >
-                    Melhor Envio → Tokens / Apps
-                  </a>
-                  , crie um app OAuth (produção ou sandbox).
+                  No Melhor Envio, cole a Redirect URI abaixo no app OAuth.
                 </li>
-                <li>
-                  Cole no app a <strong>Redirect URI</strong> mostrada abaixo
-                  (tem que ser idêntica).
-                </li>
-                <li>
-                  No Vercel → Environment Variables, adicione:
-                  <ul className="mt-1 list-disc pl-4">
-                    <li>
-                      <code>MELHOR_ENVIO_CLIENT_ID</code>
-                    </li>
-                    <li>
-                      <code>MELHOR_ENVIO_CLIENT_SECRET</code>
-                    </li>
-                    <li>
-                      <code>APP_BASE_URL</code> ={" "}
-                      <code>https://lm-moda-feminina.vercel.app</code>
-                    </li>
-                    <li>
-                      <code>MELHOR_ENVIO_SANDBOX</code> ={" "}
-                      <code>true</code> só se o app for sandbox
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  Salve e faça <strong>Redeploy</strong> no Vercel (obrigatório).
-                </li>
+                <li>Salve as variáveis no Vercel → Redeploy.</li>
                 <li>
                   Volte aqui e clique em <strong>Conectar Melhor Envio</strong>.
                 </li>
@@ -256,11 +252,13 @@ export default function AdminFretePage() {
               {meStatus.expiresInDays != null
                 ? ` · token renova sozinho (expira em ~${meStatus.expiresInDays} dias)`
                 : ""}
+              {meStatus.sandbox ? " · sandbox" : " · produção"}
             </p>
           ) : (
             <p className="text-gray-600">
-              App configurado no Vercel. Clique em conectar e autorize no Melhor
-              Envio.
+              App configurado no Vercel
+              {meStatus.sandbox ? " (sandbox)" : " (produção)"}. Clique em
+              conectar e autorize no Melhor Envio.
             </p>
           )}
           <p className="break-all rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
