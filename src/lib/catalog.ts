@@ -184,10 +184,14 @@ export async function fetchProductGifts(productId: string) {
     .from("product_gifts")
     .select("*, gifts(*)")
     .eq("product_id", productId);
-  return (data || []).map((row) => ({
-    ...row,
-    gift_data: row.gifts,
-  }));
+  return (data || []).map((row) => {
+    const raw = row.gifts;
+    const gift = Array.isArray(raw) ? raw[0] : raw;
+    return {
+      ...row,
+      gift_data: gift || undefined,
+    };
+  });
 }
 
 export async function lookupCustomerByPhone(

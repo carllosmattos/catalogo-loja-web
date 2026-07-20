@@ -69,16 +69,26 @@ export function OrderDetailClient({
     const payment = bundle.payment;
     if (!payment?.provider_payment_id) return;
     setSyncing(true);
-    await fetch(`/api/payments/${bundle.order.id}/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        providerPaymentId: payment.provider_payment_id,
-        customerId: customer?.id,
-      }),
-    });
-    await refresh();
-    setSyncing(false);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/payments/${bundle.order.id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerPaymentId: payment.provider_payment_id,
+          customerId: customer?.id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error || "Falha ao atualizar pagamento");
+      }
+      await refresh();
+    } catch {
+      setActionError("Erro de rede ao sincronizar.");
+    } finally {
+      setSyncing(false);
+    }
   }
 
   async function cancelOrder() {

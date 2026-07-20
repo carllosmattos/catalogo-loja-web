@@ -54,7 +54,13 @@ export default function AdminPagamentosPage() {
       if (!res.ok) {
         setMessage(data.error || "Falha ao atualizar status");
       } else {
-        setMessage("Status atualizado com o Mercado Pago.");
+        const st = String(data.status || "");
+        setMessage(
+          data.message ||
+            (st === "approved"
+              ? "Pagamento aprovado — venda deve aparecer em Vendas."
+              : `Status: ${st}`)
+        );
       }
       await load();
     } catch {
