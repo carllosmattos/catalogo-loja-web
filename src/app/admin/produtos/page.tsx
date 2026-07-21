@@ -9,7 +9,7 @@ import {
   AdminFormActions,
 } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
-import { SIZES, SIZE_LABELS } from "@/lib/sizes";
+import { SIZES, SIZE_LABELS, sizeDisplayLabel } from "@/lib/sizes";
 import { formatCurrency } from "@/lib/utils";
 import type { Product, Category, Gift } from "@/types";
 
@@ -674,7 +674,7 @@ export default function AdminProdutosPage() {
                         <div className="flex justify-between gap-2">
                           <span className="font-medium">
                             {MOVEMENT_LABELS[m.movement_type] || m.movement_type}{" "}
-                            · {SIZE_LABELS[m.product_size] || m.product_size}
+                            · {sizeDisplayLabel(m.product_size)}
                           </span>
                           <span
                             className={
