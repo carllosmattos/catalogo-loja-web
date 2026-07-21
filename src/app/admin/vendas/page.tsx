@@ -23,6 +23,9 @@ import {
   buildAdminSaleQuoteMessage,
   buildWhatsappUrl,
 } from "@/lib/whatsapp";
+import { buildAdminSalePricing } from "@/lib/admin-sale-pricing";
+import { validateCouponClient } from "@/lib/coupons";
+import type { CouponValidation, Product, Promotion } from "@/types";
 
 type SaleRow = Record<string, unknown> & {
   id: string;
@@ -92,6 +95,19 @@ export default function AdminVendasPage() {
   const [pixBusy, setPixBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [linkedGifts, setLinkedGifts] = useState<
+    Array<{
+      quantity_per_sale?: number;
+      gift_data?: Record<string, unknown>;
+      gifts?: Record<string, unknown>;
+    }>
+  >([]);
+  const [couponCode, setCouponCode] = useState("");
+  const [coupon, setCoupon] = useState<CouponValidation | null>(null);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [ajusteDraft, setAjusteDraft] = useState<Record<string, string>>({});
+  const [ajusteBusyId, setAjusteBusyId] = useState<string | null>(null);
   const [form, setForm] = useState({
     customer_cpf: "",
     customer_name: "",
@@ -99,7 +115,6 @@ export default function AdminVendasPage() {
     product_size: "",
     quantity: 1,
     sale_freight: 0,
-    ajuste: 0,
   });
   const [cpfHint, setCpfHint] = useState<string | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
@@ -124,23 +139,56 @@ export default function AdminVendasPage() {
     return selectedProduct.sizes[form.product_size] || 0;
   }, [selectedProduct, form.product_size]);
 
-  const productSubtotal = useMemo(() => {
-    if (!selectedProduct) return 0;
-    return (
-      Number(selectedProduct.sale_price) * Math.max(0, Number(form.quantity) || 0)
-    );
-  }, [selectedProduct, form.quantity]);
+  const productAsCatalog: Product | null = selectedProduct
+    ? ({
+        id: selectedProduct.id,
+        name: selectedProduct.name,
+        purchase_price: selectedProduct.purchase_price,
+        purchase_freight: selectedProduct.purchase_freight,
+        sale_price: selectedProduct.sale_price,
+        sale_freight: 0,
+        stock: 0,
+        active: true,
+        sizes: SIZES.map((s) => ({
+          size: s,
+          stock: selectedProduct.sizes[s] || 0,
+        })),
+      } as Product)
+    : null;
 
-  const freightCharged =
+  const freightQuoted =
     shippingMethod === "uber" ? 0 : Math.max(0, Number(form.sale_freight) || 0);
-  const ajuste = Number(form.ajuste) || 0;
-  const precoFinal = productSubtotal + freightCharged;
-  const lucroEstimado =
-    precoFinal -
-    ((selectedProduct?.purchase_price || 0) +
-      (selectedProduct?.purchase_freight || 0)) *
-      Math.max(0, Number(form.quantity) || 0) -
-    ajuste;
+
+  const pricing = useMemo(() => {
+    if (!productAsCatalog || !form.product_size) return null;
+    return buildAdminSalePricing({
+      product: productAsCatalog,
+      linkedGifts,
+      promotions,
+      size: form.product_size,
+      quantity: Math.max(1, Number(form.quantity) || 1),
+      freightQuoted,
+      applyShippingPromo: false,
+      coupon,
+    });
+  }, [
+    productAsCatalog,
+    linkedGifts,
+    promotions,
+    form.product_size,
+    form.quantity,
+    freightQuoted,
+    coupon,
+  ]);
+
+  const productSubtotal = pricing
+    ? pricing.preco_final - pricing.sale_freight
+    : selectedProduct
+      ? Number(selectedProduct.sale_price) * Math.max(0, Number(form.quantity) || 0)
+      : 0;
+  const freightCharged = pricing?.sale_freight ?? freightQuoted;
+  const precoFinal = pricing?.preco_final ?? productSubtotal + freightCharged;
+  const lucroEstimado = pricing?.lucro ?? 0;
 
   const outOfStock =
     Boolean(form.product_id) && availableSizes.length === 0;
@@ -153,7 +201,8 @@ export default function AdminVendasPage() {
     !(shippingMethod === "delivery" && quote?.blocked);
 
   async function load() {
-    const [{ data: s }, { data: p }, { data: sizeRows }, { data: settings }] =
+    const now = new Date().toISOString();
+    const [{ data: s }, { data: p }, { data: sizeRows }, { data: settings }, { data: promos }] =
       await Promise.all([
         supabase
           .from("sales")
@@ -171,6 +220,12 @@ export default function AdminVendasPage() {
           .select("store_name, whatsapp_number")
           .limit(1)
           .maybeSingle(),
+        supabase
+          .from("promotions")
+          .select("*")
+          .eq("active", true)
+          .or(`starts_at.is.null,starts_at.lte.${now}`)
+          .or(`ends_at.is.null,ends_at.gte.${now}`),
       ]);
 
     const sizeMap: Record<string, Record<string, number>> = {};
@@ -196,6 +251,28 @@ export default function AdminVendasPage() {
     if (settings?.whatsapp_number) {
       setWhatsappNumber(String(settings.whatsapp_number));
     }
+    setPromotions((promos as Promotion[]) || []);
+  }
+
+  async function loadGiftsForProduct(productId: string) {
+    if (!productId) {
+      setLinkedGifts([]);
+      return;
+    }
+    const { data } = await supabase
+      .from("product_gifts")
+      .select("quantity_per_sale, gifts(*)")
+      .eq("product_id", productId);
+    setLinkedGifts(
+      (data || []).map((row) => {
+        const raw = row.gifts;
+        const gift = Array.isArray(raw) ? raw[0] : raw;
+        return {
+          quantity_per_sale: Number(row.quantity_per_sale) || 1,
+          gift_data: (gift as Record<string, unknown>) || undefined,
+        };
+      })
+    );
   }
 
   useEffect(() => {
@@ -210,7 +287,6 @@ export default function AdminVendasPage() {
       product_size: "",
       quantity: 1,
       sale_freight: 0,
-      ajuste: 0,
     });
     setCustomerId(null);
     setCustomerPhone("");
@@ -219,6 +295,9 @@ export default function AdminVendasPage() {
     setQuote(null);
     setShippingMethod("delivery");
     setPixResult(null);
+    setCouponCode("");
+    setCoupon(null);
+    setLinkedGifts([]);
     setCpfHint(null);
     nameFromLookup.current = false;
   }
@@ -292,6 +371,8 @@ export default function AdminVendasPage() {
       sale_freight: 0,
     }));
     setQuote(null);
+    setCoupon(null);
+    loadGiftsForProduct(id);
   }
 
   function onSizeChange(size: string) {
@@ -433,6 +514,54 @@ export default function AdminVendasPage() {
     window.open(buildWhatsappUrl(phone, msg), "_blank", "noopener");
   }
 
+  async function applyCoupon() {
+    if (!couponCode.trim()) {
+      setCoupon(null);
+      setMessage("Informe o código do cupom.");
+      return;
+    }
+    if (!pricing && !selectedProduct) {
+      setMessage("Selecione o produto antes de aplicar o cupom.");
+      return;
+    }
+    setCouponBusy(true);
+    setMessage("");
+    const base = productAsCatalog
+      ? buildAdminSalePricing({
+          product: productAsCatalog,
+          linkedGifts,
+          promotions,
+          size: form.product_size || "M",
+          quantity: Math.max(1, Number(form.quantity) || 1),
+          freightQuoted,
+          applyShippingPromo: false,
+          coupon: null,
+        })
+      : null;
+    const subtotal = base
+      ? base.preco_catalogo - base.desconto_promo
+      : productSubtotal;
+    const freight = base?.sale_freight ?? freightQuoted;
+    const result = await validateCouponClient(
+      couponCode.trim(),
+      customerId,
+      subtotal,
+      freight
+    );
+    setCouponBusy(false);
+    if (!result.ok) {
+      setCoupon(null);
+      setMessage(result.error || "Cupom inválido");
+      return;
+    }
+    setCoupon(result);
+    setMessage(
+      `Cupom ${result.code} aplicado (−${formatCurrency(Number(result.discount_amount) || 0)}${
+        result.discount_target === "shipping" ? " no frete" : ""
+      }).`
+    );
+  }
+
   async function generatePix() {
     setMessage("");
     if (!canSell || !selectedProduct) {
@@ -471,18 +600,13 @@ export default function AdminVendasPage() {
             address_city: address.city,
             address_state: address.state,
           },
-          product: {
-            id: selectedProduct.id,
-            name: selectedProduct.name,
-            size: form.product_size,
-            quantity: form.quantity,
-            sale_price: selectedProduct.sale_price,
-            purchase_price: selectedProduct.purchase_price,
-            purchase_freight: selectedProduct.purchase_freight,
-          },
-          saleFreight: freightCharged,
+          productId: selectedProduct.id,
+          size: form.product_size,
+          quantity: form.quantity,
+          freightQuoted,
           shippingMethod,
           shippingLabel: quote?.label,
+          couponCode: coupon?.ok ? coupon.code : couponCode || null,
         }),
       });
       const data = await res.json();
@@ -533,7 +657,7 @@ export default function AdminVendasPage() {
   async function registerSale(e: React.FormEvent) {
     e.preventDefault();
     setMessage("");
-    if (!canSell || !selectedProduct) {
+    if (!canSell || !selectedProduct || !pricing) {
       setMessage(
         outOfStock
           ? "Produto sem estoque — não é possível vender."
@@ -550,15 +674,20 @@ export default function AdminVendasPage() {
     const notesParts: string[] = [];
     if (shippingMethod === "uber") notesParts.push("Entrega: Uber");
     else if (quote?.label) notesParts.push(`Frete: ${quote.label}`);
-    if (ajuste) {
+    if (pricing.promotion_name) {
+      notesParts.push(`Promo: ${pricing.promotion_name}`);
+    }
+    if (pricing.coupon_code) {
       notesParts.push(
-        `Ajuste frete real: ${ajuste > 0 ? "+" : ""}${ajuste.toFixed(2)}`
+        `Cupom: ${pricing.coupon_code}${
+          pricing.coupon_title ? ` (${pricing.coupon_title})` : ""
+        }`
       );
     }
     const addr = addressText();
     if (addr) notesParts.push(`Endereço:\n${addr}`);
 
-    const { error } = await supabase.rpc("register_sale", {
+    const { data: saleId, error } = await supabase.rpc("register_sale", {
       p_customer_cpf: form.customer_cpf.replace(/\D/g, ""),
       p_customer_name: form.customer_name,
       p_customer_phone: customerPhone,
@@ -567,60 +696,70 @@ export default function AdminVendasPage() {
       p_product_name: selectedProduct.name,
       p_product_size: form.product_size,
       p_quantity: qty,
-      p_preco_catalogo: productSubtotal,
-      p_desconto: 0,
-      p_sale_freight: freightCharged,
-      p_preco_final: precoFinal,
-      p_lucro: lucroEstimado,
-      p_promotion_id: null,
-      p_promotion_name: null,
+      p_preco_catalogo: pricing.preco_catalogo,
+      p_desconto: pricing.desconto_total,
+      p_sale_freight: pricing.sale_freight,
+      p_preco_final: pricing.preco_final,
+      p_lucro: pricing.lucro,
+      p_promotion_id: pricing.promotion_id,
+      p_promotion_name: pricing.promotion_name,
       p_notes: notesParts.join("\n"),
-      p_gifts: [],
-      p_ajuste_valor: ajuste,
+      p_gifts: pricing.gifts,
+      p_ajuste_valor: 0,
     });
     if (error) {
-      // Fallback se migration 035 ainda não rodou (sem p_ajuste_valor)
-      if (
-        String(error.message).includes("ajuste") ||
-        error.code === "PGRST202"
-      ) {
-        const { error: err2 } = await supabase.rpc("register_sale", {
-          p_customer_cpf: form.customer_cpf.replace(/\D/g, ""),
-          p_customer_name: form.customer_name,
-          p_customer_phone: customerPhone,
-          p_customer_id: customerId,
-          p_product_id: form.product_id,
-          p_product_name: selectedProduct.name,
-          p_product_size: form.product_size,
-          p_quantity: qty,
-          p_preco_catalogo: productSubtotal,
-          p_desconto: 0,
-          p_sale_freight: freightCharged,
-          p_preco_final: precoFinal,
-          p_lucro: lucroEstimado,
-          p_promotion_id: null,
-          p_promotion_name: null,
-          p_notes: notesParts.join("\n"),
-          p_gifts: [],
-        });
-        if (err2) {
-          setMessage(err2.message);
-          return;
-        }
+      setMessage(error.message);
+      return;
+    }
+
+    const couponRedeem =
+      pricing.desconto_cupom_produto + pricing.coupon_shipping_discount;
+    if (pricing.coupon_code && couponRedeem > 0 && saleId) {
+      const { error: redeemErr } = await supabase.rpc("redeem_coupon", {
+        p_code: pricing.coupon_code,
+        p_customer_id: customerId,
+        p_order_id: null,
+        p_discount_amount: couponRedeem,
+        p_sale_id: saleId,
+      });
+      if (redeemErr) {
         setMessage(
-          ajuste
-            ? "Venda ok, mas o ajuste no lucro exige a migration 035 no Supabase."
-            : "Venda registrada."
+          `Venda ok, mas o cupom não foi marcado como usado: ${redeemErr.message}. Rode a migration 036.`
         );
         resetSaleForm();
         load();
         return;
       }
-      setMessage(error.message);
-      return;
     }
+
     resetSaleForm();
     setMessage("Venda registrada.");
+    load();
+  }
+
+  async function saveSaleAjuste(saleId: string) {
+    const raw = ajusteDraft[saleId];
+    const value = Number(raw);
+    if (Number.isNaN(value)) {
+      setMessage("Informe um valor numérico no ajuste.");
+      return;
+    }
+    setAjusteBusyId(saleId);
+    setMessage("");
+    const { error } = await supabase.rpc("update_sale_ajuste", {
+      p_sale_id: saleId,
+      p_ajuste_valor: value,
+    });
+    setAjusteBusyId(null);
+    if (error) {
+      setMessage(
+        error.message.includes("update_sale_ajuste")
+          ? "Rode a migration 036 no Supabase para salvar o ajuste pós-venda."
+          : error.message
+      );
+      return;
+    }
+    setMessage("Ajuste de frete real salvo — lucro atualizado.");
     load();
   }
 
@@ -916,38 +1055,60 @@ export default function AdminVendasPage() {
             </div>
 
             <AdminInput
-              label="Ajuste frete real (+ caro / − barato)"
-              type="number"
-              step="0.01"
-              value={form.ajuste}
-              onChange={(e) =>
-                setForm({ ...form, ajuste: Number(e.target.value) })
-              }
+              label="Cupom (opcional)"
+              value={couponCode}
+              onChange={(e) => {
+                setCouponCode(e.target.value);
+                setCoupon(null);
+              }}
+              placeholder="Código do cupom"
             />
-            <p className="text-xs text-gray-500">
-              Custo interno: se o frete real ficou R$ 5 mais caro que o cobrado,
-              coloque <strong>+5</strong> (reduz o lucro). Se ficou mais barato,
-              use valor negativo.
-            </p>
+            <div className="flex gap-2">
+              <AdminButton
+                type="button"
+                variant="secondary"
+                onClick={applyCoupon}
+                disabled={couponBusy || !form.product_id}
+              >
+                {couponBusy ? "Validando…" : "Aplicar cupom"}
+              </AdminButton>
+              {coupon?.ok && (
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setCoupon(null);
+                    setCouponCode("");
+                  }}
+                >
+                  Remover cupom
+                </AdminButton>
+              )}
+            </div>
+            {pricing?.promotion_name && (
+              <p className="text-xs text-green-700">
+                Promoção vigente: {pricing.promotion_name} (−
+                {formatCurrency(pricing.desconto_promo)})
+              </p>
+            )}
 
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
               <div className="flex justify-between">
-                <span>Produto</span>
-                <span>{formatCurrency(productSubtotal)}</span>
+                <span>Catálogo</span>
+                <span>
+                  {formatCurrency(pricing?.preco_catalogo ?? productSubtotal)}
+                </span>
               </div>
+              {(pricing?.desconto_total || 0) > 0 && (
+                <div className="flex justify-between text-green-700">
+                  <span>Descontos</span>
+                  <span>−{formatCurrency(pricing!.desconto_total)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>Frete cobrado</span>
                 <span>{formatCurrency(freightCharged)}</span>
               </div>
-              {ajuste !== 0 && (
-                <div className="flex justify-between text-gray-600">
-                  <span>Ajuste (custo)</span>
-                  <span>
-                    {ajuste > 0 ? "+" : ""}
-                    {formatCurrency(ajuste)}
-                  </span>
-                </div>
-              )}
               <div className="mt-1 flex justify-between border-t pt-1 font-semibold">
                 <span>Total cliente</span>
                 <span>{formatCurrency(precoFinal)}</span>
@@ -956,6 +1117,10 @@ export default function AdminVendasPage() {
                 <span>Lucro estimado</span>
                 <span>{formatCurrency(lucroEstimado)}</span>
               </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Ajuste de frete real (+/−) fica no histórico da venda, depois que
+                ela for concluída.
+              </p>
             </div>
 
             <AdminFormActions>
@@ -1225,6 +1390,45 @@ export default function AdminVendasPage() {
                             </ul>
                           </div>
                         )}
+
+                        <div className="rounded-xl border border-dashed border-gray-200 p-3">
+                          <p className="mb-1 text-sm font-medium">
+                            Ajuste frete real (após envio)
+                          </p>
+                          <p className="mb-2 text-xs text-gray-500">
+                            + se o frete real ficou mais caro (reduz lucro); − se
+                            ficou mais barato.
+                          </p>
+                          <div className="flex flex-wrap items-end gap-2">
+                            <div className="min-w-[120px] flex-1">
+                              <AdminInput
+                                label="Valor (R$)"
+                                type="number"
+                                step="0.01"
+                                value={
+                                  ajusteDraft[String(s.id)] ??
+                                  String(Number(s.ajuste_valor) || 0)
+                                }
+                                onChange={(e) =>
+                                  setAjusteDraft((d) => ({
+                                    ...d,
+                                    [String(s.id)]: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <AdminButton
+                              type="button"
+                              variant="secondary"
+                              disabled={ajusteBusyId === String(s.id)}
+                              onClick={() => saveSaleAjuste(String(s.id))}
+                            >
+                              {ajusteBusyId === String(s.id)
+                                ? "Salvando…"
+                                : "Salvar ajuste"}
+                            </AdminButton>
+                          </div>
+                        </div>
 
                         <AdminButton
                           variant="danger"

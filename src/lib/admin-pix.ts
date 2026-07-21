@@ -1,4 +1,14 @@
 import {
+  fetchActivePromotions,
+  fetchProduct,
+  fetchProductGifts,
+} from "@/lib/catalog";
+import { buildAdminSalePricing } from "@/lib/admin-sale-pricing";
+import {
+  redeemCouponServer,
+  validateCouponServer,
+} from "@/lib/coupons-server";
+import {
   appBaseUrl,
   createPixCheckout,
   extractPixQrBase64,
@@ -26,19 +36,14 @@ export type AdminPixSaleInput = {
     address_city?: string;
     address_state?: string;
   };
-  product: {
-    id: string;
-    name: string;
-    size: string;
-    quantity: number;
-    sale_price: number;
-    purchase_price: number;
-    purchase_freight: number;
-  };
-  /** Frete cobrado do cliente (já na linha do pedido). */
-  saleFreight: number;
+  productId: string;
+  size: string;
+  quantity: number;
+  /** Frete cotado (antes de promo/cupom de frete). */
+  freightQuoted: number;
   shippingMethod: "delivery" | "uber";
   shippingLabel?: string;
+  couponCode?: string | null;
   notes?: string;
 };
 
@@ -193,33 +198,74 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     );
   }
 
-  const qty = Math.max(1, Number(input.product.quantity) || 1);
-  const unitPrice = Number(input.product.sale_price) || 0;
-  const freight = Math.max(0, Number(input.saleFreight) || 0);
-  const productSubtotal = unitPrice * qty;
-  const precoFinalLine = productSubtotal + freight;
-  const custoUnit =
-    (Number(input.product.purchase_price) || 0) +
-    (Number(input.product.purchase_freight) || 0);
-  const lucroLine = precoFinalLine - custoUnit * qty;
+  const product = await fetchProduct(input.productId);
+  if (!product) throw new Error("Produto não encontrado.");
+
+  const qty = Math.max(1, Number(input.quantity) || 1);
+  const [promotions, linkedGifts] = await Promise.all([
+    fetchActivePromotions(),
+    fetchProductGifts(product.id),
+  ]);
 
   const customer = await ensureCustomerForAdminPix(input.customer);
   await cancelPendingOrdersForCustomer(customer.id);
 
+  const freightQuoted =
+    input.shippingMethod === "uber"
+      ? 0
+      : Math.max(0, Number(input.freightQuoted) || 0);
+
+  let coupon = null;
+  if (input.couponCode?.trim()) {
+    const unitProbe = buildAdminSalePricing({
+      product,
+      linkedGifts,
+      promotions,
+      size: input.size,
+      quantity: qty,
+      freightQuoted,
+      applyShippingPromo: false,
+      coupon: null,
+    });
+    const subtotalForCoupon =
+      unitProbe.preco_catalogo - unitProbe.desconto_promo;
+    const freightForCoupon = unitProbe.sale_freight;
+    coupon = await validateCouponServer(
+      input.couponCode.trim(),
+      customer.id,
+      subtotalForCoupon,
+      freightForCoupon
+    );
+    if (!coupon.ok) {
+      throw new Error(coupon.error || "Cupom inválido");
+    }
+  }
+
+  const pricing = buildAdminSalePricing({
+    product,
+    linkedGifts,
+    promotions,
+    size: input.size,
+    quantity: qty,
+    freightQuoted,
+    applyShippingPromo: false,
+    coupon,
+  });
+
   const lines = [
     {
-      product_id: String(input.product.id),
-      product_name: input.product.name,
-      product_size: input.product.size,
+      product_id: String(product.id),
+      product_name: product.name,
+      product_size: input.size,
       quantity: qty,
-      preco_catalogo: productSubtotal,
-      desconto: 0,
-      sale_freight: freight,
-      preco_final_line: precoFinalLine,
-      lucro_line: lucroLine,
-      promotion_id: "",
-      promotion_name: "",
-      gifts_snapshot: [],
+      preco_catalogo: pricing.preco_catalogo,
+      desconto: pricing.desconto_total,
+      sale_freight: pricing.sale_freight,
+      preco_final_line: pricing.preco_final,
+      lucro_line: pricing.lucro,
+      promotion_id: pricing.promotion_id || "",
+      promotion_name: pricing.promotion_name || "",
+      gifts_snapshot: pricing.gifts,
     },
   ];
 
@@ -241,6 +287,17 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
 
+  const couponRedeemAmt =
+    pricing.desconto_cupom_produto + pricing.coupon_shipping_discount;
+  if (coupon?.ok && coupon.code && couponRedeemAmt > 0) {
+    await redeemCouponServer(
+      coupon.code,
+      customer.id,
+      orderId,
+      couponRedeemAmt
+    );
+  }
+
   const now = new Date();
   now.setMinutes(now.getMinutes() + PIX_EXPIRY_MINUTES);
   const brOffset = -3 * 60;
@@ -251,7 +308,7 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
   const result = await createPixCheckout({
     orderId,
     amount: total,
-    description: input.product.name,
+    description: product.name,
     payer: {
       email: customer.email,
       name: customer.name,
@@ -294,9 +351,10 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     customer_id: customer.id,
     customer_name: customer.name,
     customer_phone: customer.phone,
-    product_name: input.product.name,
-    product_size: input.product.size,
+    product_name: product.name,
+    product_size: input.size,
     quantity: qty,
     tracking_url: `${base}/pedidos/${trackingToken}`,
+    pricing,
   };
 }

@@ -15,14 +15,17 @@ export async function POST(request: Request) {
     const body = await request.json();
     const {
       customer,
-      product,
-      saleFreight,
+      productId,
+      size,
+      quantity,
+      freightQuoted,
       shippingMethod,
       shippingLabel,
+      couponCode,
       notes,
     } = body;
 
-    if (!product?.id || !product?.size || !customer?.cpf || !customer?.name) {
+    if (!productId || !size || !customer?.cpf || !customer?.name) {
       return NextResponse.json(
         { error: "Preencha cliente, produto e tamanho." },
         { status: 400 }
@@ -44,18 +47,13 @@ export async function POST(request: Request) {
         address_city: customer.address_city,
         address_state: customer.address_state,
       },
-      product: {
-        id: String(product.id),
-        name: String(product.name),
-        size: String(product.size),
-        quantity: Number(product.quantity) || 1,
-        sale_price: Number(product.sale_price) || 0,
-        purchase_price: Number(product.purchase_price) || 0,
-        purchase_freight: Number(product.purchase_freight) || 0,
-      },
-      saleFreight: Number(saleFreight) || 0,
+      productId: String(productId),
+      size: String(size),
+      quantity: Number(quantity) || 1,
+      freightQuoted: Number(freightQuoted) || 0,
       shippingMethod: shippingMethod === "uber" ? "uber" : "delivery",
       shippingLabel: shippingLabel ? String(shippingLabel) : undefined,
+      couponCode: typeof couponCode === "string" ? couponCode : null,
       notes: notes ? String(notes) : undefined,
     });
 

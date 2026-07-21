@@ -22,9 +22,10 @@ export async function validateCouponServer(
 
 export async function redeemCouponServer(
   code: string,
-  customerId: string,
-  orderId: string,
-  discountAmount: number
+  customerId: string | null,
+  orderId: string | null,
+  discountAmount: number,
+  saleId?: string | null
 ): Promise<void> {
   const supabase = await createServiceClient();
   const { data, error } = await supabase.rpc("redeem_coupon", {
@@ -32,6 +33,7 @@ export async function redeemCouponServer(
     p_customer_id: customerId,
     p_order_id: orderId,
     p_discount_amount: discountAmount,
+    p_sale_id: saleId || null,
   });
   if (error) throw new Error(error.message);
   const result = (Array.isArray(data) ? data[0] : data) as {
