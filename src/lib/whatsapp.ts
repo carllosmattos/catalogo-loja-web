@@ -107,3 +107,54 @@ export function buildCartMessage(
   lines.push(`TOTAL: ${formatCurrency(grandTotal)}`, "", `Vi no catálogo da ${storeName}`);
   return lines.join("\n");
 }
+
+/** Cotação de venda manual (admin → cliente no WhatsApp). */
+export function buildAdminSaleQuoteMessage(params: {
+  storeName: string;
+  productName: string;
+  size?: string | null;
+  quantity: number;
+  productSubtotal: number;
+  shippingMethod: "delivery" | "uber";
+  shippingAmount: number;
+  shippingLabel?: string | null;
+  deliveryRange?: string | null;
+  ajuste?: number;
+  total: number;
+  customerName?: string;
+  addressText?: string;
+}): string {
+  const lines = [
+    `Olá${params.customerName ? `, ${params.customerName}` : ""}!`,
+    "",
+    `Segue a cotação da ${params.storeName}:`,
+    "",
+    `Peça: ${params.productName}`,
+  ];
+  if (params.size) lines.push(`Tamanho: ${sizeDisplayLabel(params.size)}`);
+  lines.push(`Quantidade: ${params.quantity}`);
+  lines.push(`Produto: ${formatCurrency(params.productSubtotal)}`);
+
+  if (params.shippingMethod === "uber") {
+    lines.push("Entrega: Uber (a combinar)");
+    lines.push("Frete: a combinar pelo WhatsApp");
+  } else {
+    if (params.shippingLabel) lines.push(`Entrega: ${params.shippingLabel}`);
+    if (params.deliveryRange) lines.push(`Prazo: ${params.deliveryRange}`);
+    lines.push(`Frete: ${formatCurrency(params.shippingAmount)}`);
+  }
+
+  if (params.addressText) {
+    lines.push("", "Endereço:", params.addressText);
+  }
+
+  if (params.ajuste) {
+    lines.push(
+      `Ajuste: ${params.ajuste > 0 ? "+" : ""}${formatCurrency(params.ajuste)}`
+    );
+  }
+
+  lines.push("", `TOTAL: ${formatCurrency(params.total)}`, "");
+  lines.push("Qualquer dúvida, me chama aqui 💕");
+  return lines.join("\n");
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -9,33 +9,73 @@ import {
   AdminButton,
   AdminFormActions,
 } from "@/components/admin/AdminUI";
+import {
+  BRAZILIAN_STATES,
+  addressFieldsFromCustomer,
+  formatCustomerAddress,
+  type AddressFields,
+} from "@/lib/address";
+import { SIZES, SIZE_LABELS, sizeDisplayLabel } from "@/lib/sizes";
 import { formatCurrency, formatCpf, normalizeCpf } from "@/lib/utils";
-import { sizeDisplayLabel } from "@/lib/sizes";
+import {
+  buildAdminSaleQuoteMessage,
+  buildWhatsappUrl,
+} from "@/lib/whatsapp";
 
 type SaleRow = Record<string, unknown> & {
   id: string;
   sale_gifts?: Array<Record<string, unknown>>;
 };
 
+type ProductOption = {
+  id: string;
+  name: string;
+  purchase_price: number;
+  purchase_freight: number;
+  sale_price: number;
+  sizes: Record<string, number>;
+};
+
+type ShippingQuoteState = {
+  amount: number;
+  label: string;
+  blocked: boolean;
+  delivery_range?: string | null;
+  source?: string;
+};
+
+const emptyAddress = (): AddressFields => ({
+  zip: "",
+  street: "",
+  number: "",
+  complement: "",
+  neighborhood: "",
+  city: "",
+  state: "",
+});
+
 export default function AdminVendasPage() {
   const [sales, setSales] = useState<SaleRow[]>([]);
-  const [products, setProducts] = useState<
-    {
-      id: string;
-      name: string;
-      purchase_price: number;
-      purchase_freight: number;
-      sale_price: number;
-    }[]
-  >([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [storeName, setStoreName] = useState("LM moda feminina");
+  const [whatsappNumber, setWhatsappNumber] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [address, setAddress] = useState<AddressFields>(emptyAddress());
+  const [shippingMethod, setShippingMethod] = useState<"delivery" | "uber">(
+    "delivery"
+  );
+  const [quote, setQuote] = useState<ShippingQuoteState | null>(null);
+  const [quoting, setQuoting] = useState(false);
   const [form, setForm] = useState({
     customer_cpf: "",
     customer_name: "",
     product_id: "",
-    product_size: "M",
+    product_size: "",
     quantity: 1,
-    preco_final: 0,
+    sale_freight: 0,
+    ajuste: 0,
   });
   const [cpfHint, setCpfHint] = useState<string | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
@@ -43,18 +83,78 @@ export default function AdminVendasPage() {
   const nameFromLookup = useRef(false);
   const supabase = createClient();
 
+  const selectedProduct = products.find((p) => p.id === form.product_id);
+
+  const availableSizes = useMemo(() => {
+    if (!selectedProduct) return [];
+    return SIZES.filter((s) => (selectedProduct.sizes[s] || 0) > 0).map(
+      (s) => ({
+        size: s,
+        stock: selectedProduct.sizes[s] || 0,
+      })
+    );
+  }, [selectedProduct]);
+
+  const maxQty = useMemo(() => {
+    if (!selectedProduct || !form.product_size) return 0;
+    return selectedProduct.sizes[form.product_size] || 0;
+  }, [selectedProduct, form.product_size]);
+
+  const productSubtotal = useMemo(() => {
+    if (!selectedProduct) return 0;
+    return (
+      Number(selectedProduct.sale_price) * Math.max(0, Number(form.quantity) || 0)
+    );
+  }, [selectedProduct, form.quantity]);
+
+  const freightCharged =
+    shippingMethod === "uber" ? 0 : Math.max(0, Number(form.sale_freight) || 0);
+  const ajuste = Number(form.ajuste) || 0;
+  const precoFinal = productSubtotal + freightCharged;
+  const lucroEstimado =
+    precoFinal -
+    ((selectedProduct?.purchase_price || 0) +
+      (selectedProduct?.purchase_freight || 0)) *
+      Math.max(0, Number(form.quantity) || 0) -
+    ajuste;
+
+  const outOfStock =
+    Boolean(form.product_id) && availableSizes.length === 0;
+  const canSell =
+    Boolean(form.product_id) &&
+    Boolean(form.product_size) &&
+    maxQty > 0 &&
+    form.quantity >= 1 &&
+    form.quantity <= maxQty &&
+    !(shippingMethod === "delivery" && quote?.blocked);
+
   async function load() {
-    const [{ data: s }, { data: p }] = await Promise.all([
-      supabase
-        .from("sales")
-        .select("*, sale_gifts(*)")
-        .order("created_at", { ascending: false })
-        .limit(50),
-      supabase
-        .from("products")
-        .select("id, name, purchase_price, purchase_freight, sale_price")
-        .eq("active", true),
-    ]);
+    const [{ data: s }, { data: p }, { data: sizeRows }, { data: settings }] =
+      await Promise.all([
+        supabase
+          .from("sales")
+          .select("*, sale_gifts(*)")
+          .order("created_at", { ascending: false })
+          .limit(50),
+        supabase
+          .from("products")
+          .select("id, name, purchase_price, purchase_freight, sale_price")
+          .eq("active", true)
+          .order("name"),
+        supabase.from("product_sizes").select("product_id, size, stock"),
+        supabase
+          .from("store_settings")
+          .select("store_name, whatsapp_number")
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+    const sizeMap: Record<string, Record<string, number>> = {};
+    for (const row of sizeRows || []) {
+      if (!sizeMap[row.product_id]) sizeMap[row.product_id] = {};
+      sizeMap[row.product_id][row.size] = Number(row.stock) || 0;
+    }
+
     setSales((s as SaleRow[]) || []);
     setProducts(
       (p || []).map((row) => ({
@@ -63,39 +163,79 @@ export default function AdminVendasPage() {
         purchase_price: Number(row.purchase_price) || 0,
         purchase_freight: Number(row.purchase_freight) || 0,
         sale_price: Number(row.sale_price) || 0,
+        sizes: Object.fromEntries(
+          SIZES.map((sz) => [sz, sizeMap[row.id]?.[sz] ?? 0])
+        ),
       }))
     );
+    if (settings?.store_name) setStoreName(String(settings.store_name));
+    if (settings?.whatsapp_number) {
+      setWhatsappNumber(String(settings.whatsapp_number));
+    }
   }
 
   useEffect(() => {
     load();
   }, []);
 
+  function resetSaleForm() {
+    setForm({
+      customer_cpf: "",
+      customer_name: "",
+      product_id: "",
+      product_size: "",
+      quantity: 1,
+      sale_freight: 0,
+      ajuste: 0,
+    });
+    setCustomerId(null);
+    setCustomerPhone("");
+    setAddress(emptyAddress());
+    setQuote(null);
+    setShippingMethod("delivery");
+    setCpfHint(null);
+    nameFromLookup.current = false;
+  }
+
   async function lookupCustomerByCpf(raw: string) {
     const cpf = normalizeCpf(raw);
     if (!cpf) {
       setCpfHint(null);
+      setCustomerId(null);
       return;
     }
     setLookingUp(true);
     const { data } = await supabase
       .from("customers")
-      .select("id, name, cpf")
+      .select("*")
       .eq("cpf", cpf)
       .maybeSingle();
     setLookingUp(false);
 
     if (data?.name) {
       nameFromLookup.current = true;
+      setCustomerId(String(data.id));
+      setCustomerPhone(String(data.phone || ""));
+      setAddress(addressFieldsFromCustomer(data));
       setForm((f) => ({ ...f, customer_name: String(data.name) }));
-      setCpfHint("Cliente encontrado — nome preenchido.");
-    } else {
+      const hasAddr = Boolean(
+        data.address_zip || data.address_city || data.address
+      );
       setCpfHint(
-        "CPF sem cadastro. Nome ficará só na venda (não cria cliente)."
+        hasAddr
+          ? "Cliente encontrado — nome e endereço preenchidos."
+          : "Cliente encontrado sem endereço. Preencha abaixo para cotar frete."
+      );
+    } else {
+      setCustomerId(null);
+      setCustomerPhone("");
+      setCpfHint(
+        "CPF sem cadastro. Preencha nome e endereço para cotar frete (não cria cliente)."
       );
       if (nameFromLookup.current) {
         nameFromLookup.current = false;
         setForm((f) => ({ ...f, customer_name: "" }));
+        setAddress(emptyAddress());
       }
     }
   }
@@ -109,47 +249,227 @@ export default function AdminVendasPage() {
     }
   }
 
+  function onProductChange(id: string) {
+    const p = products.find((x) => x.id === id);
+    const sizes = p
+      ? SIZES.filter((s) => (p.sizes[s] || 0) > 0)
+      : [];
+    const firstSize = sizes[0] || "";
+    const stock = firstSize && p ? p.sizes[firstSize] || 0 : 0;
+    setForm((f) => ({
+      ...f,
+      product_id: id,
+      product_size: firstSize,
+      quantity: stock > 0 ? 1 : 0,
+      sale_freight: 0,
+    }));
+    setQuote(null);
+  }
+
+  function onSizeChange(size: string) {
+    const stock = selectedProduct?.sizes[size] || 0;
+    setForm((f) => ({
+      ...f,
+      product_size: size,
+      quantity: Math.min(Math.max(1, f.quantity), stock || 1),
+    }));
+    setQuote(null);
+  }
+
+  async function quoteShipping() {
+    if (!form.product_id) {
+      setMessage("Selecione um produto para cotar o frete.");
+      return;
+    }
+    setQuoting(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/shipping/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: customerId || undefined,
+          address: {
+            zip: address.zip,
+            street: address.street,
+            number: address.number,
+            complement: address.complement,
+            neighborhood: address.neighborhood,
+            city: address.city,
+            state: address.state,
+          },
+          cart: [
+            {
+              product_id: form.product_id,
+              quantity: Math.max(1, Number(form.quantity) || 1),
+            },
+          ],
+          shippingMethod,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.error || "Falha ao cotar frete");
+        setQuote(null);
+        return;
+      }
+      setQuote({
+        amount: Number(data.amount) || 0,
+        label: String(data.label || ""),
+        blocked: Boolean(data.blocked),
+        delivery_range: data.delivery_range ?? null,
+        source: data.source,
+      });
+      if (shippingMethod === "delivery" && !data.blocked) {
+        setForm((f) => ({ ...f, sale_freight: Number(data.amount) || 0 }));
+      } else if (shippingMethod === "uber") {
+        setForm((f) => ({ ...f, sale_freight: 0 }));
+      }
+    } catch {
+      setMessage("Erro ao cotar frete.");
+    } finally {
+      setQuoting(false);
+    }
+  }
+
+  function addressText() {
+    return formatCustomerAddress({
+      address_zip: address.zip,
+      address_street: address.street,
+      address_number: address.number,
+      address_complement: address.complement,
+      address_neighborhood: address.neighborhood,
+      address_city: address.city,
+      address_state: address.state,
+      address: "",
+      name: "",
+      phone: "",
+      cpf: "",
+      email: "",
+      id: "",
+      points: 0,
+    });
+  }
+
+  function shareWhatsApp() {
+    if (!form.product_id || !selectedProduct) {
+      setMessage("Selecione o produto antes de compartilhar.");
+      return;
+    }
+    const msg = buildAdminSaleQuoteMessage({
+      storeName,
+      productName: selectedProduct.name,
+      size: form.product_size,
+      quantity: Math.max(1, Number(form.quantity) || 1),
+      productSubtotal,
+      shippingMethod,
+      shippingAmount: freightCharged,
+      shippingLabel: quote?.label,
+      deliveryRange: quote?.delivery_range,
+      total: precoFinal,
+      customerName: form.customer_name || undefined,
+      addressText: shippingMethod === "delivery" ? addressText() : undefined,
+    });
+    const phone = customerPhone.replace(/\D/g, "") || whatsappNumber;
+    if (!phone) {
+      setMessage(
+        "Informe o WhatsApp do cliente ou configure o da loja em Admin → Loja."
+      );
+      return;
+    }
+    window.open(buildWhatsappUrl(phone, msg), "_blank", "noopener");
+  }
+
   async function registerSale(e: React.FormEvent) {
     e.preventDefault();
     setMessage("");
-    const product = products.find((p) => p.id === form.product_id);
+    if (!canSell || !selectedProduct) {
+      setMessage(
+        outOfStock
+          ? "Produto sem estoque — não é possível vender."
+          : "Selecione tamanho e quantidade disponíveis."
+      );
+      return;
+    }
     const qty = Math.max(1, Number(form.quantity) || 1);
-    const custoUnit =
-      (product?.purchase_price || 0) + (product?.purchase_freight || 0);
-    // Backend (migration 034) recalcula lucro se p_lucro = 0; enviamos estimado só p/ UX antiga
-    const lucroEstimado = form.preco_final - custoUnit * qty;
+    if (qty > maxQty) {
+      setMessage(`Estoque insuficiente (máx. ${maxQty}).`);
+      return;
+    }
+
+    const notesParts: string[] = [];
+    if (shippingMethod === "uber") notesParts.push("Entrega: Uber");
+    else if (quote?.label) notesParts.push(`Frete: ${quote.label}`);
+    if (ajuste) {
+      notesParts.push(
+        `Ajuste frete real: ${ajuste > 0 ? "+" : ""}${ajuste.toFixed(2)}`
+      );
+    }
+    const addr = addressText();
+    if (addr) notesParts.push(`Endereço:\n${addr}`);
+
     const { error } = await supabase.rpc("register_sale", {
       p_customer_cpf: form.customer_cpf.replace(/\D/g, ""),
       p_customer_name: form.customer_name,
-      p_customer_phone: "",
+      p_customer_phone: customerPhone,
+      p_customer_id: customerId,
       p_product_id: form.product_id,
-      p_product_name: product?.name || "",
+      p_product_name: selectedProduct.name,
       p_product_size: form.product_size,
       p_quantity: qty,
-      p_preco_catalogo: form.preco_final,
+      p_preco_catalogo: productSubtotal,
       p_desconto: 0,
-      p_sale_freight: 0,
-      p_preco_final: form.preco_final,
+      p_sale_freight: freightCharged,
+      p_preco_final: precoFinal,
       p_lucro: lucroEstimado,
       p_promotion_id: null,
       p_promotion_name: null,
-      p_notes: "",
+      p_notes: notesParts.join("\n"),
       p_gifts: [],
+      p_ajuste_valor: ajuste,
     });
     if (error) {
+      // Fallback se migration 035 ainda não rodou (sem p_ajuste_valor)
+      if (
+        String(error.message).includes("ajuste") ||
+        error.code === "PGRST202"
+      ) {
+        const { error: err2 } = await supabase.rpc("register_sale", {
+          p_customer_cpf: form.customer_cpf.replace(/\D/g, ""),
+          p_customer_name: form.customer_name,
+          p_customer_phone: customerPhone,
+          p_customer_id: customerId,
+          p_product_id: form.product_id,
+          p_product_name: selectedProduct.name,
+          p_product_size: form.product_size,
+          p_quantity: qty,
+          p_preco_catalogo: productSubtotal,
+          p_desconto: 0,
+          p_sale_freight: freightCharged,
+          p_preco_final: precoFinal,
+          p_lucro: lucroEstimado,
+          p_promotion_id: null,
+          p_promotion_name: null,
+          p_notes: notesParts.join("\n"),
+          p_gifts: [],
+        });
+        if (err2) {
+          setMessage(err2.message);
+          return;
+        }
+        setMessage(
+          ajuste
+            ? "Venda ok, mas o ajuste no lucro exige a migration 035 no Supabase."
+            : "Venda registrada."
+        );
+        resetSaleForm();
+        load();
+        return;
+      }
       setMessage(error.message);
       return;
     }
-    setForm({
-      customer_cpf: "",
-      customer_name: "",
-      product_id: "",
-      product_size: "M",
-      quantity: 1,
-      preco_final: 0,
-    });
-    setCpfHint(null);
-    nameFromLookup.current = false;
+    resetSaleForm();
     setMessage("Venda registrada.");
     load();
   }
@@ -207,58 +527,293 @@ export default function AdminVendasPage() {
                 setForm({ ...form, customer_name: e.target.value });
               }}
             />
+            <AdminInput
+              label="WhatsApp do cliente"
+              value={customerPhone}
+              onChange={(e) => setCustomerPhone(e.target.value)}
+              placeholder="Para compartilhar a cotação"
+            />
+
             <div>
               <label className="text-sm font-medium">Produto</label>
               <select
                 value={form.product_id}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  const p = products.find((x) => x.id === id);
-                  setForm({
-                    ...form,
-                    product_id: id,
-                    preco_final: p
-                      ? Number(p.sale_price) * Math.max(1, form.quantity)
-                      : form.preco_final,
-                  });
-                }}
+                onChange={(e) => onProductChange(e.target.value)}
                 className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
                 required
               >
                 <option value="">Selecione</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
+                {products.map((p) => {
+                  const total = SIZES.reduce(
+                    (s, sz) => s + (p.sizes[sz] || 0),
+                    0
+                  );
+                  return (
+                    <option key={p.id} value={p.id} disabled={total === 0}>
+                      {p.name}
+                      {total === 0 ? " (esgotado)" : ` · est. ${total}`}
+                    </option>
+                  );
+                })}
               </select>
             </div>
+
+            {form.product_id && (
+              <>
+                {outOfStock ? (
+                  <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
+                    Produto esgotado — não é possível selecionar tamanho nem
+                    quantidade.
+                  </p>
+                ) : (
+                  <>
+                    <div>
+                      <label className="text-sm font-medium">Tamanho</label>
+                      <select
+                        value={form.product_size}
+                        onChange={(e) => onSizeChange(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                        required
+                      >
+                        <option value="">Selecione</option>
+                        {availableSizes.map(({ size, stock }) => (
+                          <option key={size} value={size}>
+                            {SIZE_LABELS[size]} — {stock} em estoque
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <AdminInput
+                      label={`Quantidade (máx. ${maxQty})`}
+                      type="number"
+                      min={1}
+                      max={maxQty}
+                      value={form.quantity}
+                      onChange={(e) => {
+                        const q = Number(e.target.value);
+                        setForm({
+                          ...form,
+                          quantity: Math.min(Math.max(1, q), maxQty || 1),
+                        });
+                        setQuote(null);
+                      }}
+                      required
+                    />
+                  </>
+                )}
+              </>
+            )}
+
+            <div className="space-y-2 rounded-xl border border-gray-100 p-3">
+              <p className="text-sm font-medium">Entrega</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShippingMethod("delivery");
+                    setQuote(null);
+                  }}
+                  className={`flex-1 rounded-xl border px-3 py-2 text-sm ${
+                    shippingMethod === "delivery"
+                      ? "border-[var(--color-primary)] bg-[var(--color-accent)]"
+                      : ""
+                  }`}
+                >
+                  Frete no endereço
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShippingMethod("uber");
+                    setForm((f) => ({ ...f, sale_freight: 0 }));
+                    setQuote({
+                      amount: 0,
+                      label: "Uber — combinar no WhatsApp",
+                      blocked: false,
+                      delivery_range: "Combinar pelo WhatsApp",
+                      source: "uber",
+                    });
+                  }}
+                  className={`flex-1 rounded-xl border px-3 py-2 text-sm ${
+                    shippingMethod === "uber"
+                      ? "border-[var(--color-primary)] bg-[var(--color-accent)]"
+                      : ""
+                  }`}
+                >
+                  Uber
+                </button>
+              </div>
+
+              {shippingMethod === "delivery" && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <AdminInput
+                    label="CEP"
+                    value={address.zip}
+                    onChange={(e) =>
+                      setAddress({ ...address, zip: e.target.value })
+                    }
+                  />
+                  <div>
+                    <label className="text-sm font-medium">UF</label>
+                    <select
+                      value={address.state}
+                      onChange={(e) =>
+                        setAddress({ ...address, state: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                    >
+                      <option value="">—</option>
+                      {BRAZILIAN_STATES.map((uf) => (
+                        <option key={uf} value={uf}>
+                          {uf}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <AdminInput
+                      label="Rua"
+                      value={address.street}
+                      onChange={(e) =>
+                        setAddress({ ...address, street: e.target.value })
+                      }
+                    />
+                  </div>
+                  <AdminInput
+                    label="Número"
+                    value={address.number}
+                    onChange={(e) =>
+                      setAddress({ ...address, number: e.target.value })
+                    }
+                  />
+                  <AdminInput
+                    label="Complemento"
+                    value={address.complement}
+                    onChange={(e) =>
+                      setAddress({ ...address, complement: e.target.value })
+                    }
+                  />
+                  <AdminInput
+                    label="Bairro"
+                    value={address.neighborhood}
+                    onChange={(e) =>
+                      setAddress({ ...address, neighborhood: e.target.value })
+                    }
+                  />
+                  <AdminInput
+                    label="Cidade"
+                    value={address.city}
+                    onChange={(e) =>
+                      setAddress({ ...address, city: e.target.value })
+                    }
+                  />
+                </div>
+              )}
+
+              {shippingMethod === "delivery" && (
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={quoteShipping}
+                  disabled={quoting || !form.product_id}
+                >
+                  {quoting ? "Cotando…" : "Calcular frete (como no site)"}
+                </AdminButton>
+              )}
+
+              {quote && (
+                <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                  {quote.blocked ? (
+                    <p className="text-red-600">
+                      Região indisponível: {quote.label}
+                    </p>
+                  ) : (
+                    <>
+                      <p>{quote.label || "Frete"}</p>
+                      {quote.delivery_range && (
+                        <p className="text-xs text-gray-500">
+                          Prazo: {quote.delivery_range}
+                        </p>
+                      )}
+                      {shippingMethod === "delivery" && (
+                        <p className="font-medium">
+                          {formatCurrency(quote.amount)}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {shippingMethod === "delivery" && (
+                <AdminInput
+                  label="Frete cobrado do cliente (R$)"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={form.sale_freight}
+                  onChange={(e) =>
+                    setForm({ ...form, sale_freight: Number(e.target.value) })
+                  }
+                />
+              )}
+            </div>
+
             <AdminInput
-              label="Tamanho"
-              value={form.product_size}
-              onChange={(e) =>
-                setForm({ ...form, product_size: e.target.value })
-              }
-            />
-            <AdminInput
-              label="Quantidade"
-              type="number"
-              value={form.quantity}
-              onChange={(e) =>
-                setForm({ ...form, quantity: Number(e.target.value) })
-              }
-            />
-            <AdminInput
-              label="Preço final"
+              label="Ajuste frete real (+ caro / − barato)"
               type="number"
               step="0.01"
-              value={form.preco_final}
+              value={form.ajuste}
               onChange={(e) =>
-                setForm({ ...form, preco_final: Number(e.target.value) })
+                setForm({ ...form, ajuste: Number(e.target.value) })
               }
             />
+            <p className="text-xs text-gray-500">
+              Custo interno: se o frete real ficou R$ 5 mais caro que o cobrado,
+              coloque <strong>+5</strong> (reduz o lucro). Se ficou mais barato,
+              use valor negativo.
+            </p>
+
+            <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
+              <div className="flex justify-between">
+                <span>Produto</span>
+                <span>{formatCurrency(productSubtotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Frete cobrado</span>
+                <span>{formatCurrency(freightCharged)}</span>
+              </div>
+              {ajuste !== 0 && (
+                <div className="flex justify-between text-gray-600">
+                  <span>Ajuste (custo)</span>
+                  <span>
+                    {ajuste > 0 ? "+" : ""}
+                    {formatCurrency(ajuste)}
+                  </span>
+                </div>
+              )}
+              <div className="mt-1 flex justify-between border-t pt-1 font-semibold">
+                <span>Total cliente</span>
+                <span>{formatCurrency(precoFinal)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>Lucro estimado</span>
+                <span>{formatCurrency(lucroEstimado)}</span>
+              </div>
+            </div>
+
             <AdminFormActions>
-              <AdminButton type="submit">Registrar venda</AdminButton>
+              <AdminButton type="submit" disabled={!canSell}>
+                Registrar venda
+              </AdminButton>
+              <AdminButton
+                type="button"
+                variant="secondary"
+                onClick={shareWhatsApp}
+                disabled={!form.product_id}
+              >
+                WhatsApp
+              </AdminButton>
             </AdminFormActions>
           </form>
         </AdminCard>
@@ -346,6 +901,13 @@ export default function AdminVendasPage() {
                               {formatCurrency(Number(s.sale_freight))}
                             </p>
                           )}
+                          {Number(s.ajuste_valor) !== 0 && (
+                            <p>
+                              <span className="text-gray-400">Ajuste:</span>{" "}
+                              {Number(s.ajuste_valor) > 0 ? "+" : ""}
+                              {formatCurrency(Number(s.ajuste_valor))}
+                            </p>
+                          )}
                           <p>
                             <span className="text-gray-400">Lucro:</span>{" "}
                             {formatCurrency(Number(s.lucro) || 0)}
@@ -368,7 +930,9 @@ export default function AdminVendasPage() {
                           ) : null}
                           {s.order_id ? (
                             <p className="sm:col-span-2">
-                              <span className="text-gray-400">Pedido online:</span>{" "}
+                              <span className="text-gray-400">
+                                Pedido online:
+                              </span>{" "}
                               #{String(s.order_id).slice(0, 8)}
                             </p>
                           ) : null}
@@ -379,7 +943,7 @@ export default function AdminVendasPage() {
                             </p>
                           ) : null}
                           {s.notes ? (
-                            <p className="sm:col-span-2">
+                            <p className="sm:col-span-2 whitespace-pre-wrap">
                               <span className="text-gray-400">Obs:</span>{" "}
                               {String(s.notes)}
                             </p>
