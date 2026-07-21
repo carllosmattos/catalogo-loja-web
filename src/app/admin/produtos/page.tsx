@@ -706,8 +706,7 @@ export default function AdminProdutosPage() {
             {products.map((p) => {
               const total =
                 p.sizes?.reduce((s, row) => s + Number(row.stock || 0), 0) ??
-                Number(p.stock) ||
-                0;
+                (Number(p.stock) || 0);
               return (
                 <li
                   key={p.id}
