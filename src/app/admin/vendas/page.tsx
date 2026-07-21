@@ -19,7 +19,15 @@ type SaleRow = Record<string, unknown> & {
 
 export default function AdminVendasPage() {
   const [sales, setSales] = useState<SaleRow[]>([]);
-  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
+  const [products, setProducts] = useState<
+    {
+      id: string;
+      name: string;
+      purchase_price: number;
+      purchase_freight: number;
+      sale_price: number;
+    }[]
+  >([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [form, setForm] = useState({
     customer_cpf: "",
@@ -42,10 +50,21 @@ export default function AdminVendasPage() {
         .select("*, sale_gifts(*)")
         .order("created_at", { ascending: false })
         .limit(50),
-      supabase.from("products").select("id, name").eq("active", true),
+      supabase
+        .from("products")
+        .select("id, name, purchase_price, purchase_freight, sale_price")
+        .eq("active", true),
     ]);
     setSales((s as SaleRow[]) || []);
-    setProducts(p || []);
+    setProducts(
+      (p || []).map((row) => ({
+        id: row.id,
+        name: row.name,
+        purchase_price: Number(row.purchase_price) || 0,
+        purchase_freight: Number(row.purchase_freight) || 0,
+        sale_price: Number(row.sale_price) || 0,
+      }))
+    );
   }
 
   useEffect(() => {
@@ -94,6 +113,11 @@ export default function AdminVendasPage() {
     e.preventDefault();
     setMessage("");
     const product = products.find((p) => p.id === form.product_id);
+    const qty = Math.max(1, Number(form.quantity) || 1);
+    const custoUnit =
+      (product?.purchase_price || 0) + (product?.purchase_freight || 0);
+    // Backend (migration 034) recalcula lucro se p_lucro = 0; enviamos estimado só p/ UX antiga
+    const lucroEstimado = form.preco_final - custoUnit * qty;
     const { error } = await supabase.rpc("register_sale", {
       p_customer_cpf: form.customer_cpf.replace(/\D/g, ""),
       p_customer_name: form.customer_name,
@@ -101,13 +125,16 @@ export default function AdminVendasPage() {
       p_product_id: form.product_id,
       p_product_name: product?.name || "",
       p_product_size: form.product_size,
-      p_quantity: form.quantity,
+      p_quantity: qty,
       p_preco_catalogo: form.preco_final,
       p_desconto: 0,
       p_sale_freight: 0,
       p_preco_final: form.preco_final,
-      p_lucro: 0,
+      p_lucro: lucroEstimado,
       p_promotion_id: null,
+      p_promotion_name: null,
+      p_notes: "",
+      p_gifts: [],
     });
     if (error) {
       setMessage(error.message);
@@ -184,9 +211,17 @@ export default function AdminVendasPage() {
               <label className="text-sm font-medium">Produto</label>
               <select
                 value={form.product_id}
-                onChange={(e) =>
-                  setForm({ ...form, product_id: e.target.value })
-                }
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const p = products.find((x) => x.id === id);
+                  setForm({
+                    ...form,
+                    product_id: id,
+                    preco_final: p
+                      ? Number(p.sale_price) * Math.max(1, form.quantity)
+                      : form.preco_final,
+                  });
+                }}
                 className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
                 required
               >
@@ -315,6 +350,16 @@ export default function AdminVendasPage() {
                             <span className="text-gray-400">Lucro:</span>{" "}
                             {formatCurrency(Number(s.lucro) || 0)}
                           </p>
+                          {(Number(s.custo_peca) > 0 ||
+                            Number(s.custo_brindes) > 0) && (
+                            <p>
+                              <span className="text-gray-400">Custo:</span>{" "}
+                              {formatCurrency(
+                                Number(s.custo_peca || 0) +
+                                  Number(s.custo_brindes || 0)
+                              )}
+                            </p>
+                          )}
                           {s.promotion_name ? (
                             <p>
                               <span className="text-gray-400">Promo:</span>{" "}
