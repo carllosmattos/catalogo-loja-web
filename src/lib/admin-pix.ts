@@ -1,6 +1,7 @@
 import {
   appBaseUrl,
   createPixCheckout,
+  extractPixQrBase64,
   paymentsEnabled,
   webhookNotificationUrl,
 } from "@/lib/payments";
@@ -47,14 +48,6 @@ function normalizePhoneBr(raw: string): string {
     digits = `55${digits}`;
   }
   return digits;
-}
-
-function extractQrBase64(payment: Record<string, unknown>): string {
-  const poi = (payment.point_of_interaction || {}) as Record<string, unknown>;
-  const tx = (poi.transaction_data || {}) as Record<string, unknown>;
-  const b64 = tx.qr_code_base64;
-  if (typeof b64 !== "string" || !b64) return "";
-  return b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
 }
 
 /** Garante cliente com e-mail válido para create_checkout_order + Mercado Pago. */
@@ -284,7 +277,7 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
   if (attachError) throw new Error(attachError.message);
 
   const base = appBaseUrl();
-  const qrBase64 = extractQrBase64(result.raw);
+  const qrBase64 = result.qrCodeBase64 || extractPixQrBase64(result.raw);
 
   return {
     order_id: orderId,

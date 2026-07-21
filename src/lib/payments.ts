@@ -16,8 +16,16 @@ export function mapMpStatus(status: string): PaymentStatus {
 export function extractPixCopyPaste(payment: Record<string, unknown>): string {
   const poi = (payment.point_of_interaction || {}) as Record<string, unknown>;
   const tx = (poi.transaction_data || {}) as Record<string, unknown>;
-  const qr = tx.qr_code || tx.qr_code_base64 || "";
+  const qr = tx.qr_code || "";
   return typeof qr === "string" ? qr : "";
+}
+
+export function extractPixQrBase64(payment: Record<string, unknown>): string {
+  const poi = (payment.point_of_interaction || {}) as Record<string, unknown>;
+  const tx = (poi.transaction_data || {}) as Record<string, unknown>;
+  const raw = tx.qr_code_base64;
+  if (typeof raw !== "string" || !raw) return "";
+  return raw.startsWith("data:") ? raw : `data:image/png;base64,${raw}`;
 }
 
 export interface CheckoutPayer {
@@ -40,6 +48,7 @@ export interface CheckoutResult {
   providerPaymentId: string;
   status: PaymentStatus;
   pixCopyPaste: string;
+  qrCodeBase64: string;
   ticketUrl: string;
   raw: Record<string, unknown>;
 }
@@ -117,6 +126,7 @@ export async function createPixCheckout(
     providerPaymentId: String(payment.id || ""),
     status: mapMpStatus(String(payment.status || "pending")),
     pixCopyPaste: pix.length < 5000 ? pix : "",
+    qrCodeBase64: extractPixQrBase64(payment),
     ticketUrl: String(tx.ticket_url || ""),
     raw: payment,
   };
