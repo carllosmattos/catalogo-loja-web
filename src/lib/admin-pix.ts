@@ -1,0 +1,309 @@
+import {
+  appBaseUrl,
+  createPixCheckout,
+  paymentsEnabled,
+  webhookNotificationUrl,
+} from "@/lib/payments";
+import { createServiceClient } from "@/lib/supabase/server";
+import { normalizeCpf } from "@/lib/utils";
+import type { Customer } from "@/types";
+
+const PIX_EXPIRY_MINUTES = 15;
+
+export type AdminPixSaleInput = {
+  customer: {
+    id?: string | null;
+    name: string;
+    phone: string;
+    cpf: string;
+    email?: string;
+    address_zip?: string;
+    address_street?: string;
+    address_number?: string;
+    address_complement?: string;
+    address_neighborhood?: string;
+    address_city?: string;
+    address_state?: string;
+  };
+  product: {
+    id: string;
+    name: string;
+    size: string;
+    quantity: number;
+    sale_price: number;
+    purchase_price: number;
+    purchase_freight: number;
+  };
+  /** Frete cobrado do cliente (já na linha do pedido). */
+  saleFreight: number;
+  shippingMethod: "delivery" | "uber";
+  shippingLabel?: string;
+  notes?: string;
+};
+
+function normalizePhoneBr(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.length === 10 || digits.length === 11) {
+    digits = `55${digits}`;
+  }
+  return digits;
+}
+
+function extractQrBase64(payment: Record<string, unknown>): string {
+  const poi = (payment.point_of_interaction || {}) as Record<string, unknown>;
+  const tx = (poi.transaction_data || {}) as Record<string, unknown>;
+  const b64 = tx.qr_code_base64;
+  if (typeof b64 !== "string" || !b64) return "";
+  return b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
+}
+
+/** Garante cliente com e-mail válido para create_checkout_order + Mercado Pago. */
+export async function ensureCustomerForAdminPix(
+  input: AdminPixSaleInput["customer"]
+): Promise<Customer> {
+  const supabase = await createServiceClient();
+  const cpf = normalizeCpf(input.cpf);
+  const phone = normalizePhoneBr(input.phone || "");
+  const name = (input.name || "").trim();
+  let email = (input.email || "").trim().toLowerCase();
+
+  if (!name) throw new Error("Informe o nome do cliente.");
+  if (cpf.length !== 11) throw new Error("Informe um CPF válido.");
+  if (phone.length < 12) {
+    throw new Error(
+      "Informe o WhatsApp do cliente com DDD (ex.: 11999999999)."
+    );
+  }
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    email = `cliente.${cpf}@pix.lm-moda.local`;
+  }
+
+  if (input.id) {
+    const { data: byId } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (byId) {
+      const patch: Record<string, unknown> = {
+        name,
+        phone,
+        cpf,
+        updated_at: new Date().toISOString(),
+      };
+      if (input.email?.trim()) patch.email = email;
+      else if (
+        !byId.email ||
+        !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(byId.email))
+      ) {
+        patch.email = email;
+      }
+      if (input.address_zip) {
+        patch.address_zip = input.address_zip.replace(/\D/g, "");
+        patch.address_street = input.address_street || "";
+        patch.address_number = input.address_number || "";
+        patch.address_complement = input.address_complement || "";
+        patch.address_neighborhood = input.address_neighborhood || "";
+        patch.address_city = input.address_city || "";
+        patch.address_state = (input.address_state || "").toUpperCase();
+      }
+      const { data: updated, error } = await supabase
+        .from("customers")
+        .update(patch)
+        .eq("id", byId.id)
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      return updated as Customer;
+    }
+  }
+
+  const { data: byCpf } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("cpf", cpf)
+    .maybeSingle();
+
+  if (byCpf) {
+    const { data: updated, error } = await supabase
+      .from("customers")
+      .update({
+        name,
+        phone,
+        email:
+          input.email?.trim() ||
+          (byCpf.email &&
+          /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(byCpf.email))
+            ? byCpf.email
+            : email),
+        address_zip: input.address_zip?.replace(/\D/g, "") || byCpf.address_zip,
+        address_street: input.address_street || byCpf.address_street,
+        address_number: input.address_number || byCpf.address_number,
+        address_complement:
+          input.address_complement || byCpf.address_complement,
+        address_neighborhood:
+          input.address_neighborhood || byCpf.address_neighborhood,
+        address_city: input.address_city || byCpf.address_city,
+        address_state:
+          (input.address_state || byCpf.address_state || "").toUpperCase(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", byCpf.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return updated as Customer;
+  }
+
+  const { data: created, error } = await supabase
+    .from("customers")
+    .insert({
+      name,
+      phone,
+      cpf,
+      email,
+      points: 0,
+      address_zip: input.address_zip?.replace(/\D/g, "") || "",
+      address_street: input.address_street || "",
+      address_number: input.address_number || "",
+      address_complement: input.address_complement || "",
+      address_neighborhood: input.address_neighborhood || "",
+      address_city: input.address_city || "",
+      address_state: (input.address_state || "").toUpperCase(),
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return created as Customer;
+}
+
+async function cancelPendingOrdersForCustomer(customerId: string) {
+  const supabase = await createServiceClient();
+  const { data: pending } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("customer_id", customerId)
+    .eq("status", "pending_payment");
+
+  for (const row of pending || []) {
+    await supabase.rpc("cancel_unpaid_order", {
+      p_order_id: row.id,
+      p_customer_id: customerId,
+    });
+  }
+}
+
+export async function startAdminPixSale(input: AdminPixSaleInput) {
+  if (!paymentsEnabled()) {
+    throw new Error(
+      "Pagamentos PIX desativados. Ative PAYMENTS_ENABLED e o Mercado Pago."
+    );
+  }
+
+  const qty = Math.max(1, Number(input.product.quantity) || 1);
+  const unitPrice = Number(input.product.sale_price) || 0;
+  const freight = Math.max(0, Number(input.saleFreight) || 0);
+  const productSubtotal = unitPrice * qty;
+  const precoFinalLine = productSubtotal + freight;
+  const custoUnit =
+    (Number(input.product.purchase_price) || 0) +
+    (Number(input.product.purchase_freight) || 0);
+  const lucroLine = precoFinalLine - custoUnit * qty;
+
+  const customer = await ensureCustomerForAdminPix(input.customer);
+  await cancelPendingOrdersForCustomer(customer.id);
+
+  const lines = [
+    {
+      product_id: String(input.product.id),
+      product_name: input.product.name,
+      product_size: input.product.size,
+      quantity: qty,
+      preco_catalogo: productSubtotal,
+      desconto: 0,
+      sale_freight: freight,
+      preco_final_line: precoFinalLine,
+      lucro_line: lucroLine,
+      promotion_id: "",
+      promotion_name: "",
+      gifts_snapshot: [],
+    },
+  ];
+
+  const supabase = await createServiceClient();
+  const { data: created, error } = await supabase.rpc("create_checkout_order", {
+    p_customer_id: customer.id,
+    p_items: lines,
+    p_shipping_amount: 0,
+    p_discount_amount: 0,
+    p_shipping_discount: 0,
+  });
+  if (error) throw new Error(error.message);
+
+  const orderData = Array.isArray(created) ? created[0] : created;
+  if (!orderData) throw new Error("Erro ao criar pedido.");
+
+  const orderId = String(orderData.order_id);
+  const trackingToken = String(orderData.tracking_token);
+  const total = Number(orderData.total_amount);
+  const expiresAt = String(orderData.expires_at || "");
+
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + PIX_EXPIRY_MINUTES);
+  const brOffset = -3 * 60;
+  const brDate = new Date(now.getTime() + brOffset * 60 * 1000);
+  const expiresIso =
+    brDate.toISOString().replace("Z", "").replace(/\.\d+/, "") + ".000-03:00";
+
+  const result = await createPixCheckout({
+    orderId,
+    amount: total,
+    description: input.product.name,
+    payer: {
+      email: customer.email,
+      name: customer.name,
+      cpf: normalizeCpf(customer.cpf),
+      phone: customer.phone,
+    },
+    notificationUrl: webhookNotificationUrl(),
+    expiresAtIso: expiresIso,
+  });
+
+  const { data: paymentId, error: attachError } = await supabase.rpc(
+    "attach_order_payment_public",
+    {
+      p_order_id: orderId,
+      p_provider_payment_id: result.providerPaymentId,
+      p_status: result.status,
+      p_amount: total,
+      p_pix_copy_paste: result.pixCopyPaste,
+      p_raw: result.raw,
+      p_expires_at: expiresAt || expiresIso,
+    }
+  );
+  if (attachError) throw new Error(attachError.message);
+
+  const base = appBaseUrl();
+  const qrBase64 = extractQrBase64(result.raw);
+
+  return {
+    order_id: orderId,
+    tracking_token: trackingToken,
+    payment_id: paymentId,
+    pix_copy_paste: result.pixCopyPaste,
+    pix_qr_base64: qrBase64,
+    ticket_url: result.ticketUrl,
+    provider_payment_id: result.providerPaymentId,
+    total,
+    shipping_method: input.shippingMethod,
+    shipping_label: input.shippingLabel || null,
+    expires_at: expiresAt || expiresIso,
+    customer_id: customer.id,
+    customer_name: customer.name,
+    customer_phone: customer.phone,
+    product_name: input.product.name,
+    product_size: input.product.size,
+    quantity: qty,
+    tracking_url: `${base}/pedidos/${trackingToken}`,
+  };
+}

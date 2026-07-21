@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import Link from "next/link";
+import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   AdminCard,
@@ -18,6 +19,7 @@ import {
 import { SIZES, SIZE_LABELS, sizeDisplayLabel } from "@/lib/sizes";
 import { formatCurrency, formatCpf, normalizeCpf } from "@/lib/utils";
 import {
+  buildAdminPixPaymentMessage,
   buildAdminSaleQuoteMessage,
   buildWhatsappUrl,
 } from "@/lib/whatsapp";
@@ -44,6 +46,23 @@ type ShippingQuoteState = {
   source?: string;
 };
 
+type PixResult = {
+  order_id: string;
+  tracking_token: string;
+  tracking_url: string;
+  pix_copy_paste: string;
+  pix_qr_base64?: string;
+  total: number;
+  provider_payment_id?: string;
+  customer_id?: string;
+  customer_name?: string;
+  customer_phone?: string;
+  product_name?: string;
+  product_size?: string;
+  quantity?: number;
+  shipping_method?: string;
+};
+
 const emptyAddress = (): AddressFields => ({
   zip: "",
   street: "",
@@ -62,12 +81,17 @@ export default function AdminVendasPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [address, setAddress] = useState<AddressFields>(emptyAddress());
   const [shippingMethod, setShippingMethod] = useState<"delivery" | "uber">(
     "delivery"
   );
   const [quote, setQuote] = useState<ShippingQuoteState | null>(null);
   const [quoting, setQuoting] = useState(false);
+  const [pixResult, setPixResult] = useState<PixResult | null>(null);
+  const [pixBusy, setPixBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [form, setForm] = useState({
     customer_cpf: "",
     customer_name: "",
@@ -190,9 +214,11 @@ export default function AdminVendasPage() {
     });
     setCustomerId(null);
     setCustomerPhone("");
+    setCustomerEmail("");
     setAddress(emptyAddress());
     setQuote(null);
     setShippingMethod("delivery");
+    setPixResult(null);
     setCpfHint(null);
     nameFromLookup.current = false;
   }
@@ -216,6 +242,7 @@ export default function AdminVendasPage() {
       nameFromLookup.current = true;
       setCustomerId(String(data.id));
       setCustomerPhone(String(data.phone || ""));
+      setCustomerEmail(String(data.email || ""));
       setAddress(addressFieldsFromCustomer(data));
       setForm((f) => ({ ...f, customer_name: String(data.name) }));
       const hasAddr = Boolean(
@@ -229,8 +256,9 @@ export default function AdminVendasPage() {
     } else {
       setCustomerId(null);
       setCustomerPhone("");
+      setCustomerEmail("");
       setCpfHint(
-        "CPF sem cadastro. Preencha nome e endereço para cotar frete (não cria cliente)."
+        "CPF sem cadastro. Preencha nome, WhatsApp e endereço (PIX cria o cliente)."
       );
       if (nameFromLookup.current) {
         nameFromLookup.current = false;
@@ -352,6 +380,31 @@ export default function AdminVendasPage() {
   }
 
   function shareWhatsApp() {
+    if (pixResult?.pix_copy_paste) {
+      const phone =
+        (pixResult.customer_phone || customerPhone).replace(/\D/g, "") ||
+        whatsappNumber;
+      if (!phone) {
+        setMessage(
+          "Informe o WhatsApp do cliente ou configure o da loja em Admin → Loja."
+        );
+        return;
+      }
+      const msg = buildAdminPixPaymentMessage({
+        storeName,
+        customerName: pixResult.customer_name || form.customer_name,
+        productName: String(pixResult.product_name || selectedProduct?.name),
+        size: pixResult.product_size || form.product_size,
+        quantity: Number(pixResult.quantity) || form.quantity,
+        total: Number(pixResult.total),
+        pixCopyPaste: pixResult.pix_copy_paste,
+        trackingUrl: pixResult.tracking_url,
+        shippingMethod:
+          pixResult.shipping_method === "uber" ? "uber" : "delivery",
+      });
+      window.open(buildWhatsappUrl(phone, msg), "_blank", "noopener");
+      return;
+    }
     if (!form.product_id || !selectedProduct) {
       setMessage("Selecione o produto antes de compartilhar.");
       return;
@@ -378,6 +431,103 @@ export default function AdminVendasPage() {
       return;
     }
     window.open(buildWhatsappUrl(phone, msg), "_blank", "noopener");
+  }
+
+  async function generatePix() {
+    setMessage("");
+    if (!canSell || !selectedProduct) {
+      setMessage(
+        outOfStock
+          ? "Produto sem estoque — não é possível gerar PIX."
+          : "Selecione tamanho e quantidade disponíveis."
+      );
+      return;
+    }
+    if (!form.customer_name.trim() || !normalizeCpf(form.customer_cpf)) {
+      setMessage("Para PIX, informe CPF e nome do cliente.");
+      return;
+    }
+    if (!customerPhone.replace(/\D/g, "")) {
+      setMessage("Para PIX, informe o WhatsApp do cliente com DDD.");
+      return;
+    }
+    setPixBusy(true);
+    try {
+      const res = await fetch("/api/admin/vendas/pix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer: {
+            id: customerId,
+            name: form.customer_name,
+            phone: customerPhone,
+            cpf: form.customer_cpf,
+            email: customerEmail || undefined,
+            address_zip: address.zip,
+            address_street: address.street,
+            address_number: address.number,
+            address_complement: address.complement,
+            address_neighborhood: address.neighborhood,
+            address_city: address.city,
+            address_state: address.state,
+          },
+          product: {
+            id: selectedProduct.id,
+            name: selectedProduct.name,
+            size: form.product_size,
+            quantity: form.quantity,
+            sale_price: selectedProduct.sale_price,
+            purchase_price: selectedProduct.purchase_price,
+            purchase_freight: selectedProduct.purchase_freight,
+          },
+          saleFreight: freightCharged,
+          shippingMethod,
+          shippingLabel: quote?.label,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao gerar PIX");
+      setPixResult(data as PixResult);
+      setMessage(
+        "PIX gerado. Estoque reservado — a venda só efetua quando pagar. Acompanhe em Pagamentos."
+      );
+      load();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Erro ao gerar PIX");
+    } finally {
+      setPixBusy(false);
+    }
+  }
+
+  async function syncPixPayment() {
+    if (!pixResult?.order_id) return;
+    setSyncBusy(true);
+    setMessage("");
+    try {
+      const res = await fetch(`/api/payments/${pixResult.order_id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerPaymentId: pixResult.provider_payment_id,
+          customerId: pixResult.customer_id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(data.error || "Falha ao atualizar status");
+      } else if (String(data.status) === "approved") {
+        setMessage("Pagamento aprovado — venda registrada e estoque baixado.");
+        setPixResult(null);
+        resetSaleForm();
+        load();
+      } else {
+        setMessage(`Status do PIX: ${data.status || "pendente"}`);
+      }
+    } catch {
+      setMessage("Erro de rede ao sincronizar pagamento.");
+    } finally {
+      setSyncBusy(false);
+    }
   }
 
   async function registerSale(e: React.FormEvent) {
@@ -531,7 +681,13 @@ export default function AdminVendasPage() {
               label="WhatsApp do cliente"
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.target.value)}
-              placeholder="Para compartilhar a cotação"
+              placeholder="Com DDD — obrigatório para PIX"
+            />
+            <AdminInput
+              label="E-mail do cliente (PIX)"
+              value={customerEmail}
+              onChange={(e) => setCustomerEmail(e.target.value)}
+              placeholder="Opcional — se vazio, usamos e-mail técnico"
             />
 
             <div>
@@ -803,19 +959,123 @@ export default function AdminVendasPage() {
             </div>
 
             <AdminFormActions>
-              <AdminButton type="submit" disabled={!canSell}>
-                Registrar venda
+              <AdminButton
+                type="button"
+                onClick={generatePix}
+                disabled={!canSell || pixBusy}
+              >
+                {pixBusy ? "Gerando PIX…" : "Gerar PIX"}
+              </AdminButton>
+              <AdminButton
+                type="submit"
+                variant="secondary"
+                disabled={!canSell}
+              >
+                Registrar sem PIX
               </AdminButton>
               <AdminButton
                 type="button"
                 variant="secondary"
                 onClick={shareWhatsApp}
-                disabled={!form.product_id}
+                disabled={!form.product_id && !pixResult}
               >
                 WhatsApp
               </AdminButton>
             </AdminFormActions>
+            <p className="text-xs text-gray-500">
+              <strong>Gerar PIX</strong> reserva o estoque e só baixa de verdade
+              quando pagar (como no site).{" "}
+              <strong>Registrar sem PIX</strong> é para dinheiro/já pago —
+              efetiva na hora.
+            </p>
           </form>
+
+          {pixResult && (
+            <div className="mt-4 space-y-3 rounded-xl border border-[var(--color-primary)]/20 bg-[var(--color-accent)] p-4 text-center">
+              <p className="text-sm font-semibold text-[var(--color-primary)]">
+                PIX gerado — aguardando pagamento
+              </p>
+              <p className="text-2xl font-bold text-[var(--color-primary)]">
+                {formatCurrency(Number(pixResult.total))}
+              </p>
+              <p className="text-xs text-gray-500">Válido por cerca de 15 min</p>
+              {pixResult.pix_qr_base64 ? (
+                <img
+                  src={pixResult.pix_qr_base64}
+                  alt="QR Code PIX"
+                  className="mx-auto h-48 w-48 rounded-lg bg-white p-2"
+                />
+              ) : pixResult.pix_copy_paste ? (
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixResult.pix_copy_paste)}`}
+                  alt="QR Code PIX"
+                  className="mx-auto h-48 w-48 rounded-lg bg-white p-2"
+                />
+              ) : null}
+              {pixResult.pix_copy_paste && (
+                <div className="flex items-center gap-2 rounded-lg bg-white p-3 text-left">
+                  <code className="flex-1 break-all text-xs">
+                    {pixResult.pix_copy_paste.slice(0, 72)}…
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(pixResult.pix_copy_paste);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }}
+                    className="shrink-0 rounded-full p-2 hover:bg-gray-100"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              )}
+              <div className="flex flex-wrap justify-center gap-2">
+                <AdminButton
+                  type="button"
+                  onClick={syncPixPayment}
+                  disabled={syncBusy}
+                >
+                  {syncBusy ? "Verificando…" : "Já pagou? Atualizar status"}
+                </AdminButton>
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={shareWhatsApp}
+                >
+                  Enviar PIX no WhatsApp
+                </AdminButton>
+                <Link
+                  href={`/pedidos/${pixResult.tracking_token}`}
+                  target="_blank"
+                  className="inline-flex items-center rounded-xl border px-4 py-2 text-sm"
+                >
+                  Ver pedido
+                </Link>
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setPixResult(null);
+                    setMessage("");
+                  }}
+                >
+                  Nova venda
+                </AdminButton>
+              </div>
+              <p className="text-xs text-gray-500">
+                Também aparece em{" "}
+                <Link href="/admin/pagamentos" className="underline">
+                  Admin → Pagamentos
+                </Link>
+                .
+              </p>
+            </div>
+          )}
         </AdminCard>
 
         <AdminCard title={`Histórico (${activeSales.length})`}>

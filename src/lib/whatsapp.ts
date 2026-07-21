@@ -158,3 +158,67 @@ export function buildAdminSaleQuoteMessage(params: {
   lines.push("Qualquer dúvida, me chama aqui 💕");
   return lines.join("\n");
 }
+
+/** Mensagem com link do pedido + código PIX para a cliente pagar. */
+export function buildAdminPixPaymentMessage(params: {
+  storeName: string;
+  customerName?: string;
+  productName: string;
+  size?: string | null;
+  quantity: number;
+  total: number;
+  pixCopyPaste?: string;
+  trackingUrl?: string;
+  shippingMethod?: "delivery" | "uber";
+}): string {
+  const lines = [
+    `Olá${params.customerName ? `, ${params.customerName}` : ""}!`,
+    "",
+    `Segue o PIX da sua compra na ${params.storeName}:`,
+    "",
+    `Peça: ${params.productName}`,
+  ];
+  if (params.size) lines.push(`Tamanho: ${sizeDisplayLabel(params.size)}`);
+  lines.push(`Quantidade: ${params.quantity}`);
+  if (params.shippingMethod === "uber") {
+    lines.push("Entrega: Uber (combinar frete)");
+  }
+  lines.push(`Total: ${formatCurrency(params.total)}`, "");
+  if (params.pixCopyPaste) {
+    lines.push("PIX copia e cola:", params.pixCopyPaste, "");
+  }
+  if (params.trackingUrl) {
+    lines.push(`Acompanhar pedido: ${params.trackingUrl}`, "");
+  }
+  lines.push("Assim que pagar, a gente confirma por aqui 💕");
+  return lines.join("\n");
+}
+
+/** PIX gerado no admin para a cliente pagar. */
+export function buildAdminPixMessage(params: {
+  storeName: string;
+  productName: string;
+  size?: string | null;
+  quantity: number;
+  total: number;
+  pixCode: string;
+  trackingUrl?: string;
+  customerName?: string;
+}): string {
+  const lines = [
+    `Olá${params.customerName ? `, ${params.customerName}` : ""}!`,
+    "",
+    `Segue o PIX da ${params.storeName}:`,
+    "",
+    `Peça: ${params.productName}`,
+  ];
+  if (params.size) lines.push(`Tamanho: ${sizeDisplayLabel(params.size)}`);
+  lines.push(`Quantidade: ${params.quantity}`);
+  lines.push(`Total: ${formatCurrency(params.total)}`);
+  lines.push("", "PIX copia e cola:", params.pixCode);
+  if (params.trackingUrl) {
+    lines.push("", `Acompanhar pedido: ${params.trackingUrl}`);
+  }
+  lines.push("", "Válido por cerca de 15 minutos. Qualquer dúvida, me chama 💕");
+  return lines.join("\n");
+}
