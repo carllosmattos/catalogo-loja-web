@@ -6,6 +6,10 @@ import { StoreHeader } from "@/components/store/StoreHeader";
 import { useCartStore, useCustomerStore } from "@/stores";
 import { buildCartMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 import { formatCurrency, cn } from "@/lib/utils";
+import {
+  UBER_FREE_SHIPPING_HINT,
+  uberNeedsStoreFreightEstimate,
+} from "@/lib/uber-freight";
 import type { ShippingMethod, StoreSettings } from "@/types";
 import { STORE_MAIN } from "@/lib/store-layout";
 import { Copy, Check } from "lucide-react";
@@ -34,6 +38,8 @@ export function CheckoutClient({
   const setShippingMethod = useCartStore((s) => s.setShippingMethod);
   const couponCode = useCartStore((s) => s.couponCode);
   const coupon = useCartStore((s) => s.coupon);
+  const uberFreightEstimate = useCartStore((s) => s.uberFreightEstimate);
+  const setUberFreightEstimate = useCartStore((s) => s.setUberFreightEstimate);
   const customer = useCustomerStore((s) => s.customer);
   const [loading, setLoading] = useState(false);
   const [pixResult, setPixResult] = useState<Record<string, unknown> | null>(
@@ -91,16 +97,26 @@ export function CheckoutClient({
       ? Number(coupon.discount_amount) || 0
       : 0;
   const shippingCouponDiscount =
-    coupon?.ok && coupon.discount_target === "shipping"
+    coupon?.ok && coupon.discount_target === "shipping" && shippingMethod !== "uber"
       ? Math.min(Number(coupon.discount_amount) || 0, freightAfterPromo)
       : 0;
   const freightAmount = Math.max(0, freightAfterPromo - shippingCouponDiscount);
   const estimatedTotal =
     Math.max(subtotal - productDiscount, 0) + freightAmount;
+  const needsUberEstimate = uberNeedsStoreFreightEstimate(
+    shippingMethod,
+    coupon
+  );
 
   async function handlePix() {
     if (!customer?.id) {
       setError("Complete seu cadastro em Minha conta.");
+      return;
+    }
+    if (needsUberEstimate && uberFreightEstimate <= 0) {
+      setError(
+        "Com Uber e cupom de frete, informe a estimativa da corrida (a loja banca o Uber)."
+      );
       return;
     }
     setLoading(true);
@@ -114,6 +130,8 @@ export function CheckoutClient({
           cart: items,
           shippingMethod,
           couponCode: coupon?.ok ? couponCode : null,
+          uberFreightEstimate:
+            shippingMethod === "uber" ? uberFreightEstimate : 0,
         }),
       });
       const data = await res.json();
@@ -172,11 +190,18 @@ export function CheckoutClient({
             <p className="mt-1 text-sm text-gray-500">
               Válido por 15 minutos
             </p>
-            {String(pixResult.shipping_method) === "uber" && (
+            {shippingMethod === "uber" && (
               <p className="mt-2 text-xs text-gray-500">
                 Entrega via Uber — combine pelo WhatsApp (frete não incluso).
               </p>
             )}
+            {Number(pixResult.frete_absorvido) > 0 &&
+              String(pixResult.shipping_method) === "uber" && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Frete grátis no Uber: custo estimado da loja{" "}
+                  {formatCurrency(Number(pixResult.frete_absorvido))}.
+                </p>
+              )}
             {pixResult.delivery_range != null &&
               String(pixResult.delivery_range) !== "" && (
               <p className="mt-1 text-xs text-gray-500">
@@ -262,6 +287,26 @@ export function CheckoutClient({
                   {label}
                 </button>
               ))}
+            </div>
+          )}
+
+          {needsUberEstimate && (
+            <div className="mb-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs text-amber-800">{UBER_FREE_SHIPPING_HINT}</p>
+              <label className="block text-xs font-medium text-amber-900">
+                Estimativa do Uber (R$)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={uberFreightEstimate || ""}
+                onChange={(e) =>
+                  setUberFreightEstimate(Number(e.target.value) || 0)
+                }
+                placeholder="Ex.: 18.90"
+                className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm"
+              />
             </div>
           )}
 

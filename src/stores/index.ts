@@ -13,12 +13,15 @@ interface CartState {
   shippingMethod: ShippingMethod;
   couponCode: string;
   coupon: CouponValidation | null;
+  /** Estimativa do Uber quando a loja banca (cupom de frete). */
+  uberFreightEstimate: number;
   addItem: (item: Omit<CartItem, "quantity"> & { quantity?: number }) => void;
   updateQuantity: (productId: string, size: ProductSize, quantity: number) => void;
   removeItem: (productId: string, size: ProductSize) => void;
   setShippingMethod: (method: ShippingMethod) => void;
   setCoupon: (code: string, coupon: CouponValidation | null) => void;
   clearCoupon: () => void;
+  setUberFreightEstimate: (value: number) => void;
   clear: () => void;
   totalItems: () => number;
 }
@@ -30,6 +33,7 @@ export const useCartStore = create<CartState>()(
       shippingMethod: "delivery",
       couponCode: "",
       coupon: null,
+      uberFreightEstimate: 0,
       addItem: (item) => {
         const qty = item.quantity || 1;
         const existing = get().items.find(
@@ -74,12 +78,17 @@ export const useCartStore = create<CartState>()(
       setShippingMethod: (method) => set({ shippingMethod: method }),
       setCoupon: (code, coupon) => set({ couponCode: code, coupon }),
       clearCoupon: () => set({ couponCode: "", coupon: null }),
+      setUberFreightEstimate: (value) =>
+        set({
+          uberFreightEstimate: Math.max(0, Math.round(Number(value) * 100) / 100),
+        }),
       clear: () =>
         set({
           items: [],
           shippingMethod: "delivery",
           couponCode: "",
           coupon: null,
+          uberFreightEstimate: 0,
         }),
       totalItems: () => get().items.reduce((s, i) => s + i.quantity, 0),
     }),

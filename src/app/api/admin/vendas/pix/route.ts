@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       shippingMethod,
       shippingLabel,
       couponCode,
+      uberFreightEstimate,
       notes,
     } = body;
 
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
       shippingMethod: shippingMethod === "uber" ? "uber" : "delivery",
       shippingLabel: shippingLabel ? String(shippingLabel) : undefined,
       couponCode: typeof couponCode === "string" ? couponCode : null,
+      uberFreightEstimate: Number(uberFreightEstimate) || 0,
       notes: notes ? String(notes) : undefined,
     });
 

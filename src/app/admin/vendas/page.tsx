@@ -25,6 +25,10 @@ import {
 } from "@/lib/whatsapp";
 import { buildAdminSalePricing } from "@/lib/admin-sale-pricing";
 import { validateCouponClient } from "@/lib/coupons";
+import {
+  UBER_FREE_SHIPPING_HINT,
+  uberNeedsStoreFreightEstimate,
+} from "@/lib/uber-freight";
 import type { CouponValidation, Product, Promotion } from "@/types";
 
 type SaleRow = Record<string, unknown> & {
@@ -106,6 +110,7 @@ export default function AdminVendasPage() {
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<CouponValidation | null>(null);
   const [couponBusy, setCouponBusy] = useState(false);
+  const [uberEstimate, setUberEstimate] = useState(0);
   const [ajusteDraft, setAjusteDraft] = useState<Record<string, string>>({});
   const [ajusteBusyId, setAjusteBusyId] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -161,6 +166,7 @@ export default function AdminVendasPage() {
 
   const pricing = useMemo(() => {
     if (!productAsCatalog || !form.product_size) return null;
+    const needsUber = uberNeedsStoreFreightEstimate(shippingMethod, coupon);
     return buildAdminSalePricing({
       product: productAsCatalog,
       linkedGifts,
@@ -170,6 +176,7 @@ export default function AdminVendasPage() {
       freightQuoted,
       applyShippingPromo: false,
       coupon,
+      uberStoreEstimate: needsUber ? uberEstimate : 0,
     });
   }, [
     productAsCatalog,
@@ -179,7 +186,14 @@ export default function AdminVendasPage() {
     form.quantity,
     freightQuoted,
     coupon,
+    shippingMethod,
+    uberEstimate,
   ]);
+
+  const needsUberEstimate = uberNeedsStoreFreightEstimate(
+    shippingMethod,
+    coupon
+  );
 
   const productSubtotal = pricing
     ? pricing.preco_final - pricing.sale_freight
@@ -198,7 +212,8 @@ export default function AdminVendasPage() {
     maxQty > 0 &&
     form.quantity >= 1 &&
     form.quantity <= maxQty &&
-    !(shippingMethod === "delivery" && quote?.blocked);
+    !(shippingMethod === "delivery" && quote?.blocked) &&
+    !(needsUberEstimate && uberEstimate <= 0);
 
   async function load() {
     const now = new Date().toISOString();
@@ -298,6 +313,7 @@ export default function AdminVendasPage() {
     setCouponCode("");
     setCoupon(null);
     setLinkedGifts([]);
+    setUberEstimate(0);
     setCpfHint(null);
     nameFromLookup.current = false;
   }
@@ -541,13 +557,42 @@ export default function AdminVendasPage() {
     const subtotal = base
       ? base.preco_catalogo - base.desconto_promo
       : productSubtotal;
-    const freight = base?.sale_freight ?? freightQuoted;
-    const result = await validateCouponClient(
+    const freightForValidate =
+      shippingMethod === "uber"
+        ? Math.max(uberEstimate, 0.01)
+        : base?.sale_freight ?? freightQuoted;
+    let result = await validateCouponClient(
       couponCode.trim(),
       customerId,
       subtotal,
-      freight
+      freightForValidate
     );
+    if (
+      result.ok &&
+      result.discount_target === "shipping" &&
+      shippingMethod === "uber" &&
+      uberEstimate <= 0
+    ) {
+      setCouponBusy(false);
+      setCoupon(null);
+      setMessage(
+        "Cupom de frete + Uber: informe a estimativa do Uber e aplique o cupom de novo."
+      );
+      return;
+    }
+    if (
+      result.ok &&
+      result.discount_target === "shipping" &&
+      shippingMethod === "uber" &&
+      uberEstimate > 0
+    ) {
+      result = await validateCouponClient(
+        couponCode.trim(),
+        customerId,
+        subtotal,
+        uberEstimate
+      );
+    }
     setCouponBusy(false);
     if (!result.ok) {
       setCoupon(null);
@@ -580,6 +625,12 @@ export default function AdminVendasPage() {
       setMessage("Para PIX, informe o WhatsApp do cliente com DDD.");
       return;
     }
+    if (needsUberEstimate && uberEstimate <= 0) {
+      setMessage(
+        "Com Uber e cupom de frete, informe a estimativa da corrida."
+      );
+      return;
+    }
     setPixBusy(true);
     try {
       const res = await fetch("/api/admin/vendas/pix", {
@@ -607,6 +658,7 @@ export default function AdminVendasPage() {
           shippingMethod,
           shippingLabel: quote?.label,
           couponCode: coupon?.ok ? coupon.code : couponCode || null,
+          uberFreightEstimate: needsUberEstimate ? uberEstimate : 0,
         }),
       });
       const data = await res.json();
@@ -662,6 +714,12 @@ export default function AdminVendasPage() {
         outOfStock
           ? "Produto sem estoque — não é possível vender."
           : "Selecione tamanho e quantidade disponíveis."
+      );
+      return;
+    }
+    if (needsUberEstimate && uberEstimate <= 0) {
+      setMessage(
+        "Com Uber e cupom de frete, informe a estimativa da corrida."
       );
       return;
     }
@@ -943,6 +1001,24 @@ export default function AdminVendasPage() {
                   Uber
                 </button>
               </div>
+
+              {needsUberEstimate && (
+                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs text-amber-800">
+                    {UBER_FREE_SHIPPING_HINT}
+                  </p>
+                  <AdminInput
+                    label="Estimativa do Uber (R$)"
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={uberEstimate}
+                    onChange={(e) =>
+                      setUberEstimate(Number(e.target.value) || 0)
+                    }
+                  />
+                </div>
+              )}
 
               {shippingMethod === "delivery" && (
                 <div className="grid grid-cols-2 gap-2 pt-1">

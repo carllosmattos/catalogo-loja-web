@@ -7,7 +7,13 @@ import type { Customer } from "@/types";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { customerId, cart, shippingMethod, couponCode } = body;
+    const {
+      customerId,
+      cart,
+      shippingMethod,
+      couponCode,
+      uberFreightEstimate,
+    } = body;
     if (!customerId || !cart?.length) {
       return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
     }
@@ -40,7 +46,8 @@ export async function POST(request: Request) {
       customer as Customer,
       lines,
       method,
-      typeof couponCode === "string" ? couponCode : null
+      typeof couponCode === "string" ? couponCode : null,
+      Number(uberFreightEstimate) || 0
     );
     return NextResponse.json(result);
   } catch (e) {

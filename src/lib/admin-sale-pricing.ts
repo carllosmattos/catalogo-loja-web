@@ -41,6 +41,11 @@ export function buildAdminSalePricing(params: {
   /** Se false, não reaplica promo de frete (já veio líquido da cotação). */
   applyShippingPromo?: boolean;
   coupon?: CouponValidation | null;
+  /**
+   * Uber + frete na conta da loja: estimativa da corrida (cliente paga R$ 0 de frete no site).
+   * Substitui frete_absorvido calculado pelo frete cotado.
+   */
+  uberStoreEstimate?: number;
 }): AdminSalePricing {
   const qty = Math.max(1, Number(params.quantity) || 1);
   const profit = calculateProfit(
@@ -85,13 +90,21 @@ export function buildAdminSalePricing(params: {
   }
 
   productSubtotal = Math.max(0, productSubtotal - couponProductDisc);
-  const saleFreight = Math.max(0, freightBefore - couponShipDisc);
+  let saleFreight = Math.max(0, freightBefore - couponShipDisc);
   const freightOriginal = Math.max(0, Number(params.freightQuoted) || 0);
-  // Tudo que a cliente não pagou do frete cotado fica na conta da loja
-  const freteAbsorvido = Math.max(
+  let freteAbsorvido = Math.max(
     0,
     Math.round((freightOriginal - saleFreight) * 100) / 100
   );
+
+  const uberEst = Math.max(0, Number(params.uberStoreEstimate) || 0);
+  if (uberEst > 0 && params.coupon?.discount_target === "shipping") {
+    // Uber: não há frete no checkout; a estimativa é custo da loja
+    saleFreight = 0;
+    freteAbsorvido = uberEst;
+    couponShipDisc = uberEst;
+  }
+
   const precoFinal = productSubtotal + saleFreight;
 
   const custoTotal =
