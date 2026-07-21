@@ -21,6 +21,9 @@ export function unwrapCoupon(data: unknown): CouponValidation {
       raw.discount_amount != null ? Number(raw.discount_amount) : undefined,
     discount_target: target,
     image_url: raw.image_url ? String(raw.image_url) : undefined,
+    shipping_deferred: Boolean(
+      (raw as CouponValidation).shipping_deferred
+    ),
   };
 }
 

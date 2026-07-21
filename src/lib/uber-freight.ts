@@ -1,4 +1,4 @@
-/** Regras de frete grátis + Uber (loja banca o Uber). */
+/** Regras de cupom de frete + Uber (estimativa só no admin, após/no envio). */
 
 export function isShippingCoupon(coupon: {
   ok?: boolean;
@@ -7,18 +7,10 @@ export function isShippingCoupon(coupon: {
   return Boolean(coupon?.ok && coupon.discount_target === "shipping");
 }
 
-export function uberNeedsStoreFreightEstimate(
-  shippingMethod: "delivery" | "uber",
-  coupon: { ok?: boolean; discount_target?: string } | null | undefined
-): boolean {
-  return shippingMethod === "uber" && isShippingCoupon(coupon);
-}
+/** Aviso suave na loja: custo do Uber é da loja; cliente não estima. */
+export const UBER_SHIPPING_COUPON_HINT =
+  "Cupom de frete no Uber: você não paga frete no site. A loja combina e banca a corrida (total ou parcial, conforme o cupom).";
 
-export const UBER_FREE_SHIPPING_HINT =
-  "Cupom de frete + Uber: a loja banca a corrida. Informe uma estimativa agora (entra no lucro) e ajuste o valor real depois do envio.";
-
-export function parseUberEstimate(value: unknown): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.round(n * 100) / 100;
-}
+/** Aviso no admin: lançar custo real depois. */
+export const UBER_ADMIN_FREIGHT_HINT =
+  "Uber + cupom de frete: a cliente não estima. No envio, lance em “Frete real pago pela loja” o valor que a loja bancou (integral ou parcial).";

@@ -96,8 +96,7 @@ export async function startPixCheckout(
   customer: Customer,
   lines: Awaited<ReturnType<typeof buildLinesFromCart>>,
   shippingMethod: "delivery" | "uber" = "delivery",
-  couponCode?: string | null,
-  uberFreightEstimate?: number | null
+  couponCode?: string | null
 ) {
   if (!paymentsEnabled()) {
     throw new Error("Pagamentos online desativados.");
@@ -135,15 +134,15 @@ export async function startPixCheckout(
   }
   const shippingAfterPromo = Math.max(0, shippingGross - shippingPromoDiscount);
 
-  const uberEst = Math.max(0, Number(uberFreightEstimate) || 0);
-  // Cupom de frete no Uber valida contra a estimativa da corrida
+  // Uber: frete no site = 0; cupom de frete valida com shipping=0 (deferred)
   const shippingForCoupon =
-    shippingMethod === "uber" ? uberEst : shippingAfterPromo;
+    shippingMethod === "uber" ? 0 : shippingAfterPromo;
 
   let productDiscount = 0;
   let shippingCouponDiscount = 0;
   let appliedCode = "";
   let shippingCouponOnUber = false;
+  let shippingDeferred = false;
   if (couponCode?.trim()) {
     const coupon = await validateCouponServer(
       couponCode.trim(),
@@ -156,17 +155,14 @@ export async function startPixCheckout(
     }
     appliedCode = String(coupon.code || couponCode.trim());
     const amt = Number(coupon.discount_amount) || 0;
+    shippingDeferred = Boolean(coupon.shipping_deferred);
     if (coupon.discount_target === "shipping") {
       if (shippingMethod === "uber") {
         shippingCouponOnUber = true;
-        if (uberEst <= 0) {
-          throw new Error(
-            "Com Uber e cupom de frete, informe a estimativa da corrida (a loja banca o Uber)."
-          );
-        }
-        // Cliente não paga frete no site; loja absorve a estimativa
-        shippingCouponDiscount = uberEst;
+        // Fixo: valor conhecido; %: 0 até o admin lançar pós-envio
+        shippingCouponDiscount = amt;
       } else {
+        // Melhor Envio: parcial ou total sobre o frete cotado
         shippingCouponDiscount = Math.min(amt, shippingAfterPromo);
       }
     } else {
@@ -176,9 +172,7 @@ export async function startPixCheckout(
 
   const shippingDiscountTotal =
     shippingMethod === "uber"
-      ? shippingCouponOnUber
-        ? uberEst
-        : 0
+      ? 0
       : shippingPromoDiscount + shippingCouponDiscount;
   const couponRedeemAmount =
     productDiscount +
@@ -209,12 +203,13 @@ export async function startPixCheckout(
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
 
+  // Uber + cupom fixo: provisional; % deferred = 0 até pós-envio
+  // Melhor Envio: promo + cupom (parcial ou total)
   const freteAbsorvido =
     shippingMethod === "uber" && shippingCouponOnUber
-      ? uberEst
+      ? shippingCouponDiscount
       : shippingDiscountTotal;
 
-  // Frete que a loja banca (promo/cupom / Uber estimado) → lucro na baixa do PIX
   if (freteAbsorvido > 0) {
     try {
       const adminDb = await createServiceClient();
@@ -229,12 +224,13 @@ export async function startPixCheckout(
     }
   }
 
-  if (appliedCode && couponRedeemAmount > 0) {
+  // Resgata cupom mesmo com discount 0 (Uber % deferred)
+  if (appliedCode && (couponRedeemAmount > 0 || shippingDeferred || shippingCouponOnUber)) {
     await redeemCouponServer(
       appliedCode,
       customer.id,
       orderId,
-      couponRedeemAmount
+      Math.max(couponRedeemAmount, 0)
     );
   }
 
@@ -301,6 +297,5 @@ export async function startPixCheckout(
     expires_at: expiresAt || expiresIso,
     back_url: `${base}/pedidos/${trackingToken}`,
     frete_absorvido: freteAbsorvido,
-    uber_freight_estimate: shippingMethod === "uber" ? uberEst : 0,
   };
 }

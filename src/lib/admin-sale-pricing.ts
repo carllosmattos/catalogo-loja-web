@@ -41,11 +41,6 @@ export function buildAdminSalePricing(params: {
   /** Se false, não reaplica promo de frete (já veio líquido da cotação). */
   applyShippingPromo?: boolean;
   coupon?: CouponValidation | null;
-  /**
-   * Uber + frete na conta da loja: estimativa da corrida (cliente paga R$ 0 de frete no site).
-   * Substitui frete_absorvido calculado pelo frete cotado.
-   */
-  uberStoreEstimate?: number;
 }): AdminSalePricing {
   const qty = Math.max(1, Number(params.quantity) || 1);
   const profit = calculateProfit(
@@ -83,26 +78,37 @@ export function buildAdminSalePricing(params: {
     couponTitle = params.coupon.title || null;
     const amt = Number(params.coupon.discount_amount) || 0;
     if (params.coupon.discount_target === "shipping") {
-      couponShipDisc = Math.min(amt, freightBefore);
+      if (freightBefore > 0) {
+        // Melhor Envio / frete cotado: parcial ou total
+        couponShipDisc = Math.min(amt, freightBefore);
+      } else {
+        // Uber / sem cotação: cupom fixo já traz discount_amount;
+        // % fica 0 até o admin lançar pós-envio
+        couponShipDisc = amt;
+      }
     } else {
       couponProductDisc = Math.min(amt, productSubtotal);
     }
   }
 
   productSubtotal = Math.max(0, productSubtotal - couponProductDisc);
-  let saleFreight = Math.max(0, freightBefore - couponShipDisc);
+  const saleFreight = Math.max(0, freightBefore - Math.min(couponShipDisc, freightBefore));
   const freightOriginal = Math.max(0, Number(params.freightQuoted) || 0);
-  let freteAbsorvido = Math.max(
-    0,
-    Math.round((freightOriginal - saleFreight) * 100) / 100
-  );
 
-  const uberEst = Math.max(0, Number(params.uberStoreEstimate) || 0);
-  if (uberEst > 0 && params.coupon?.discount_target === "shipping") {
-    // Uber: não há frete no checkout; a estimativa é custo da loja
-    saleFreight = 0;
-    freteAbsorvido = uberEst;
-    couponShipDisc = uberEst;
+  // Frete na conta da loja:
+  // - com cotação: o que a cliente não pagou do frete cotado (parcial ou total)
+  // - Uber sem cotação: valor do cupom fixo (se houver); % fica para pós-venda
+  let freteAbsorvido = 0;
+  if (freightOriginal > 0) {
+    freteAbsorvido = Math.max(
+      0,
+      Math.round((freightOriginal - saleFreight) * 100) / 100
+    );
+  } else if (
+    params.coupon?.ok &&
+    params.coupon.discount_target === "shipping"
+  ) {
+    freteAbsorvido = Math.max(0, couponShipDisc);
   }
 
   const precoFinal = productSubtotal + saleFreight;

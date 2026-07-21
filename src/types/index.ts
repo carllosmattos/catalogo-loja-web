@@ -121,6 +121,8 @@ export interface CouponValidation {
   discount_amount?: number;
   discount_target?: "product" | "shipping";
   image_url?: string;
+  /** Cupom de frete sem cotação (Uber): custo real no admin pós-envio */
+  shipping_deferred?: boolean;
 }
 
 export interface Customer {

@@ -8,9 +8,8 @@ import { useCartStore, useCustomerStore } from "@/stores";
 import { validateCouponClient } from "@/lib/coupons";
 import { formatCurrency, cn } from "@/lib/utils";
 import {
-  UBER_FREE_SHIPPING_HINT,
+  UBER_SHIPPING_COUPON_HINT,
   isShippingCoupon,
-  uberNeedsStoreFreightEstimate,
 } from "@/lib/uber-freight";
 import type { ShippingMethod, StoreSettings } from "@/types";
 import { STORE_MAIN } from "@/lib/store-layout";
@@ -41,8 +40,6 @@ export function CartPageClient({ settings }: CartPageClientProps) {
     coupon,
     setCoupon,
     clearCoupon,
-    uberFreightEstimate,
-    setUberFreightEstimate,
   } = useCartStore();
   const customer = useCustomerStore((s) => s.customer);
   const setCustomer = useCustomerStore((s) => s.setCustomer);
@@ -59,7 +56,7 @@ export function CartPageClient({ settings }: CartPageClientProps) {
   );
   const freightAfterPromo =
     shippingMethod === "uber"
-      ? Math.max(0, Number(uberFreightEstimate) || 0)
+      ? 0
       : shipping?.blocked
         ? 0
         : Number(shipping?.amount) || 0;
@@ -72,26 +69,18 @@ export function CartPageClient({ settings }: CartPageClientProps) {
       ? Number(coupon.discount_amount) || 0
       : 0;
   const shippingCouponDiscount =
-    coupon?.ok && coupon.discount_target === "shipping"
-      ? shippingMethod === "uber"
-        ? Math.max(0, Number(uberFreightEstimate) || 0)
-        : Math.min(Number(coupon.discount_amount) || 0, freightAfterPromo)
+    coupon?.ok && coupon.discount_target === "shipping" && shippingMethod !== "uber"
+      ? Math.min(Number(coupon.discount_amount) || 0, freightAfterPromo)
       : 0;
   // No checkout do site o frete Uber cobrado é sempre 0
   const freightAmount =
     shippingMethod === "uber"
       ? 0
       : Math.max(0, freightAfterPromo - shippingCouponDiscount);
-  const couponDiscountDisplay =
-    productDiscount +
-    (shippingMethod === "uber" && isShippingCoupon(coupon)
-      ? 0
-      : shippingCouponDiscount);
+  const couponDiscountDisplay = productDiscount + shippingCouponDiscount;
   const total = Math.max(subtotal - productDiscount, 0) + freightAmount;
-  const needsUberEstimate = uberNeedsStoreFreightEstimate(
-    shippingMethod,
-    coupon
-  );
+  const showUberCouponHint =
+    shippingMethod === "uber" && isShippingCoupon(coupon);
 
   useEffect(() => {
     if (!items.length || !customer?.id) {
@@ -178,56 +167,17 @@ export function CartPageClient({ settings }: CartPageClientProps) {
     setCouponError("");
     try {
       const shippingBase =
-        shippingMethod === "uber"
-          ? Math.max(0, Number(uberFreightEstimate) || 0)
-          : freightAfterPromo;
-      if (
-        shippingMethod === "uber" &&
-        shippingBase <= 0
-      ) {
-        // Ainda não sabemos se é cupom de frete; valida com 1 centavo mínimo falha shipping coupons
-        // Peça estimativa se o cupom for de frete após validar produto-only first
-      }
-      let result = await validateCouponClient(
+        shippingMethod === "uber" ? 0 : freightAfterPromo;
+      const result = await validateCouponClient(
         couponInput,
         customer?.id,
         subtotal,
-        shippingBase > 0 ? shippingBase : shippingMethod === "uber" ? 0.01 : 0
+        shippingBase
       );
-      if (
-        result.ok &&
-        result.discount_target === "shipping" &&
-        shippingMethod === "uber" &&
-        (!uberFreightEstimate || uberFreightEstimate <= 0)
-      ) {
-        clearCoupon();
-        setCouponError(
-          "Cupom de frete com Uber: informe abaixo a estimativa da corrida e aplique de novo."
-        );
-        return;
-      }
       if (!result.ok) {
         clearCoupon();
         setCouponError(result.error || "Cupom inválido");
         return;
-      }
-      // Revalida com estimativa real se Uber + frete
-      if (
-        result.discount_target === "shipping" &&
-        shippingMethod === "uber" &&
-        uberFreightEstimate > 0
-      ) {
-        result = await validateCouponClient(
-          couponInput,
-          customer?.id,
-          subtotal,
-          uberFreightEstimate
-        );
-        if (!result.ok) {
-          clearCoupon();
-          setCouponError(result.error || "Cupom inválido");
-          return;
-        }
       }
       setCoupon(String(result.code || couponInput), result);
     } catch (e) {
@@ -371,32 +321,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                       </p>
                     )}
                   </button>
-                  {needsUberEstimate && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-                      <p className="text-xs text-amber-800">
-                        {UBER_FREE_SHIPPING_HINT}
-                      </p>
-                      <label className="block text-xs font-medium text-amber-900">
-                        Estimativa do Uber (R$)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={uberFreightEstimate || ""}
-                        onChange={(e) =>
-                          setUberFreightEstimate(Number(e.target.value) || 0)
-                        }
-                        placeholder="Ex.: 18.90"
-                        className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm"
-                      />
-                      {uberFreightEstimate > 0 && (
-                        <p className="text-xs text-amber-800">
-                          Entra no lucro da loja como custo estimado. Depois do
-                          envio, ajuste o valor real no admin.
-                        </p>
-                      )}
-                    </div>
+                  {showUberCouponHint && (
+                    <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {UBER_SHIPPING_COUPON_HINT}
+                    </p>
                   )}
                   {shipError && (
                     <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -437,10 +365,16 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                 {coupon?.ok && (
                   <div className="flex items-center justify-between text-xs text-green-700">
                     <span>
-                      {coupon.code} (−{formatCurrency(couponDiscountDisplay)})
+                      {coupon.code}
                       {coupon.discount_target === "shipping"
-                        ? " · frete"
-                        : ""}
+                        ? shippingMethod === "uber"
+                          ? " · frete (loja banca no envio)"
+                          : couponDiscountDisplay > 0
+                            ? ` (−${formatCurrency(couponDiscountDisplay)} · frete)`
+                            : " · frete"
+                        : couponDiscountDisplay > 0
+                          ? ` (−${formatCurrency(couponDiscountDisplay)})`
+                          : ""}
                     </span>
                     <button
                       type="button"

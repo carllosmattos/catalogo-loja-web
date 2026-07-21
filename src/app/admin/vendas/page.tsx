@@ -26,8 +26,8 @@ import {
 import { buildAdminSalePricing } from "@/lib/admin-sale-pricing";
 import { validateCouponClient } from "@/lib/coupons";
 import {
-  UBER_FREE_SHIPPING_HINT,
-  uberNeedsStoreFreightEstimate,
+  UBER_ADMIN_FREIGHT_HINT,
+  isShippingCoupon,
 } from "@/lib/uber-freight";
 import type { CouponValidation, Product, Promotion } from "@/types";
 
@@ -110,7 +110,6 @@ export default function AdminVendasPage() {
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<CouponValidation | null>(null);
   const [couponBusy, setCouponBusy] = useState(false);
-  const [uberEstimate, setUberEstimate] = useState(0);
   const [ajusteDraft, setAjusteDraft] = useState<Record<string, string>>({});
   const [ajusteBusyId, setAjusteBusyId] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -166,7 +165,6 @@ export default function AdminVendasPage() {
 
   const pricing = useMemo(() => {
     if (!productAsCatalog || !form.product_size) return null;
-    const needsUber = uberNeedsStoreFreightEstimate(shippingMethod, coupon);
     return buildAdminSalePricing({
       product: productAsCatalog,
       linkedGifts,
@@ -176,7 +174,6 @@ export default function AdminVendasPage() {
       freightQuoted,
       applyShippingPromo: false,
       coupon,
-      uberStoreEstimate: needsUber ? uberEstimate : 0,
     });
   }, [
     productAsCatalog,
@@ -186,14 +183,10 @@ export default function AdminVendasPage() {
     form.quantity,
     freightQuoted,
     coupon,
-    shippingMethod,
-    uberEstimate,
   ]);
 
-  const needsUberEstimate = uberNeedsStoreFreightEstimate(
-    shippingMethod,
-    coupon
-  );
+  const showUberCouponHint =
+    shippingMethod === "uber" && isShippingCoupon(coupon);
 
   const productSubtotal = pricing
     ? pricing.preco_final - pricing.sale_freight
@@ -212,8 +205,7 @@ export default function AdminVendasPage() {
     maxQty > 0 &&
     form.quantity >= 1 &&
     form.quantity <= maxQty &&
-    !(shippingMethod === "delivery" && quote?.blocked) &&
-    !(needsUberEstimate && uberEstimate <= 0);
+    !(shippingMethod === "delivery" && quote?.blocked);
 
   async function load() {
     const now = new Date().toISOString();
@@ -313,7 +305,6 @@ export default function AdminVendasPage() {
     setCouponCode("");
     setCoupon(null);
     setLinkedGifts([]);
-    setUberEstimate(0);
     setCpfHint(null);
     nameFromLookup.current = false;
   }
@@ -558,41 +549,13 @@ export default function AdminVendasPage() {
       ? base.preco_catalogo - base.desconto_promo
       : productSubtotal;
     const freightForValidate =
-      shippingMethod === "uber"
-        ? Math.max(uberEstimate, 0.01)
-        : base?.sale_freight ?? freightQuoted;
-    let result = await validateCouponClient(
+      shippingMethod === "uber" ? 0 : base?.sale_freight ?? freightQuoted;
+    const result = await validateCouponClient(
       couponCode.trim(),
       customerId,
       subtotal,
       freightForValidate
     );
-    if (
-      result.ok &&
-      result.discount_target === "shipping" &&
-      shippingMethod === "uber" &&
-      uberEstimate <= 0
-    ) {
-      setCouponBusy(false);
-      setCoupon(null);
-      setMessage(
-        "Cupom de frete + Uber: informe a estimativa do Uber e aplique o cupom de novo."
-      );
-      return;
-    }
-    if (
-      result.ok &&
-      result.discount_target === "shipping" &&
-      shippingMethod === "uber" &&
-      uberEstimate > 0
-    ) {
-      result = await validateCouponClient(
-        couponCode.trim(),
-        customerId,
-        subtotal,
-        uberEstimate
-      );
-    }
     setCouponBusy(false);
     if (!result.ok) {
       setCoupon(null);
@@ -600,10 +563,23 @@ export default function AdminVendasPage() {
       return;
     }
     setCoupon(result);
+    const amt = Number(result.discount_amount) || 0;
+    const deferredNote =
+      result.discount_target === "shipping" &&
+      shippingMethod === "uber" &&
+      (result.shipping_deferred || amt === 0)
+        ? " — custo real no envio (Frete real pago pela loja)"
+        : "";
     setMessage(
-      `Cupom ${result.code} aplicado (−${formatCurrency(Number(result.discount_amount) || 0)}${
-        result.discount_target === "shipping" ? " no frete" : ""
-      }).`
+      `Cupom ${result.code} aplicado${
+        amt > 0
+          ? ` (−${formatCurrency(amt)}${
+              result.discount_target === "shipping" ? " no frete" : ""
+            })`
+          : result.discount_target === "shipping"
+            ? " (frete)"
+            : ""
+      }${deferredNote}.`
     );
   }
 
@@ -623,12 +599,6 @@ export default function AdminVendasPage() {
     }
     if (!customerPhone.replace(/\D/g, "")) {
       setMessage("Para PIX, informe o WhatsApp do cliente com DDD.");
-      return;
-    }
-    if (needsUberEstimate && uberEstimate <= 0) {
-      setMessage(
-        "Com Uber e cupom de frete, informe a estimativa da corrida."
-      );
       return;
     }
     setPixBusy(true);
@@ -658,7 +628,6 @@ export default function AdminVendasPage() {
           shippingMethod,
           shippingLabel: quote?.label,
           couponCode: coupon?.ok ? coupon.code : couponCode || null,
-          uberFreightEstimate: needsUberEstimate ? uberEstimate : 0,
         }),
       });
       const data = await res.json();
@@ -717,12 +686,6 @@ export default function AdminVendasPage() {
       );
       return;
     }
-    if (needsUberEstimate && uberEstimate <= 0) {
-      setMessage(
-        "Com Uber e cupom de frete, informe a estimativa da corrida."
-      );
-      return;
-    }
     const qty = Math.max(1, Number(form.quantity) || 1);
     if (qty > maxQty) {
       setMessage(`Estoque insuficiente (máx. ${maxQty}).`);
@@ -744,7 +707,11 @@ export default function AdminVendasPage() {
     }
     if (pricing.frete_absorvido > 0) {
       notesParts.push(
-        `Frete na conta da loja (estimado): R$ ${pricing.frete_absorvido.toFixed(2)}`
+        `Frete na conta da loja (provisório): R$ ${pricing.frete_absorvido.toFixed(2)}`
+      );
+    } else if (showUberCouponHint) {
+      notesParts.push(
+        "Cupom de frete no Uber: lançar custo real após o envio"
       );
     }
     const addr = addressText();
@@ -777,12 +744,18 @@ export default function AdminVendasPage() {
 
     const couponRedeem =
       pricing.desconto_cupom_produto + pricing.coupon_shipping_discount;
-    if (pricing.coupon_code && couponRedeem > 0 && saleId) {
+    if (
+      pricing.coupon_code &&
+      saleId &&
+      (couponRedeem > 0 ||
+        coupon?.discount_target === "shipping" ||
+        coupon?.shipping_deferred)
+    ) {
       const { error: redeemErr } = await supabase.rpc("redeem_coupon", {
         p_code: pricing.coupon_code,
         p_customer_id: customerId,
         p_order_id: null,
-        p_discount_amount: couponRedeem,
+        p_discount_amount: Math.max(couponRedeem, 0),
         p_sale_id: saleId,
       });
       if (redeemErr) {
@@ -1002,22 +975,10 @@ export default function AdminVendasPage() {
                 </button>
               </div>
 
-              {needsUberEstimate && (
-                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <p className="text-xs text-amber-800">
-                    {UBER_FREE_SHIPPING_HINT}
-                  </p>
-                  <AdminInput
-                    label="Estimativa do Uber (R$)"
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={uberEstimate}
-                    onChange={(e) =>
-                      setUberEstimate(Number(e.target.value) || 0)
-                    }
-                  />
-                </div>
+              {showUberCouponHint && (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {UBER_ADMIN_FREIGHT_HINT}
+                </p>
               )}
 
               {shippingMethod === "delivery" && (
@@ -1192,7 +1153,7 @@ export default function AdminVendasPage() {
               </div>
               {(pricing?.frete_absorvido || 0) > 0 && (
                 <div className="flex justify-between text-amber-800">
-                  <span>Frete na sua conta (est.)</span>
+                  <span>Frete na sua conta (prov.)</span>
                   <span>−{formatCurrency(pricing!.frete_absorvido)}</span>
                 </div>
               )}
@@ -1205,8 +1166,9 @@ export default function AdminVendasPage() {
                 <span>{formatCurrency(lucroEstimado)}</span>
               </div>
               <p className="mt-2 text-xs text-gray-500">
-                Frete grátis/cupom de frete já reduz o lucro. Depois do envio,
-                ajuste o valor real no histórico da venda se for diferente.
+                Cupom de frete (parcial ou total) já reduz o lucro quando o valor
+                é conhecido. No Uber, lance o valor real em “Frete real pago pela
+                loja” depois do envio.
               </p>
             </div>
 
@@ -1484,10 +1446,9 @@ export default function AdminVendasPage() {
                             Frete real pago pela loja
                           </p>
                           <p className="mb-2 text-xs text-gray-500">
-                            Se a cliente ganhou frete grátis (ou parte), o
-                            estimado já entrou no lucro. Depois do envio, coloque
-                            o valor que você pagou de verdade (substitui o
-                            estimado).
+                            Valor que a loja bancou no frete (Uber ou Melhor
+                            Envio), integral ou parcial. Substitui o provisório
+                            do cupom/promo.
                           </p>
                           <div className="flex flex-wrap items-end gap-2">
                             <div className="min-w-[120px] flex-1">

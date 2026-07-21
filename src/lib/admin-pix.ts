@@ -44,7 +44,6 @@ export type AdminPixSaleInput = {
   shippingMethod: "delivery" | "uber";
   shippingLabel?: string;
   couponCode?: string | null;
-  uberFreightEstimate?: number | null;
   notes?: string;
 };
 
@@ -215,7 +214,6 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     input.shippingMethod === "uber"
       ? 0
       : Math.max(0, Number(input.freightQuoted) || 0);
-  const uberEst = Math.max(0, Number(input.uberFreightEstimate) || 0);
 
   let coupon = null;
   if (input.couponCode?.trim()) {
@@ -231,10 +229,9 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     });
     const subtotalForCoupon =
       unitProbe.preco_catalogo - unitProbe.desconto_promo;
+    // Uber: shipping=0 → cupom deferred (fixo ou %); Melhor Envio: frete cotado
     const freightForCoupon =
-      input.shippingMethod === "uber"
-        ? Math.max(uberEst, 0.01)
-        : unitProbe.sale_freight;
+      input.shippingMethod === "uber" ? 0 : unitProbe.sale_freight;
     coupon = await validateCouponServer(
       input.couponCode.trim(),
       customer.id,
@@ -243,30 +240,6 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     );
     if (!coupon.ok) {
       throw new Error(coupon.error || "Cupom inválido");
-    }
-    if (
-      coupon.discount_target === "shipping" &&
-      input.shippingMethod === "uber" &&
-      uberEst <= 0
-    ) {
-      throw new Error(
-        "Com Uber e cupom de frete, informe a estimativa da corrida."
-      );
-    }
-    if (
-      coupon.discount_target === "shipping" &&
-      input.shippingMethod === "uber" &&
-      uberEst > 0
-    ) {
-      coupon = await validateCouponServer(
-        input.couponCode.trim(),
-        customer.id,
-        subtotalForCoupon,
-        uberEst
-      );
-      if (!coupon.ok) {
-        throw new Error(coupon.error || "Cupom inválido");
-      }
     }
   }
 
@@ -279,10 +252,6 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     freightQuoted,
     applyShippingPromo: false,
     coupon,
-    uberStoreEstimate:
-      coupon?.discount_target === "shipping" && input.shippingMethod === "uber"
-        ? uberEst
-        : 0,
   });
 
   const lines = [
@@ -333,12 +302,18 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
 
   const couponRedeemAmt =
     pricing.desconto_cupom_produto + pricing.coupon_shipping_discount;
-  if (coupon?.ok && coupon.code && couponRedeemAmt > 0) {
+  if (
+    coupon?.ok &&
+    coupon.code &&
+    (couponRedeemAmt > 0 ||
+      coupon.discount_target === "shipping" ||
+      coupon.shipping_deferred)
+  ) {
     await redeemCouponServer(
       coupon.code,
       customer.id,
       orderId,
-      couponRedeemAmt
+      Math.max(couponRedeemAmt, 0)
     );
   }
 
