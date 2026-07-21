@@ -684,6 +684,11 @@ export default function AdminVendasPage() {
         }`
       );
     }
+    if (pricing.frete_absorvido > 0) {
+      notesParts.push(
+        `Frete na conta da loja (estimado): R$ ${pricing.frete_absorvido.toFixed(2)}`
+      );
+    }
     const addr = addressText();
     if (addr) notesParts.push(`Endereço:\n${addr}`);
 
@@ -705,7 +710,7 @@ export default function AdminVendasPage() {
       p_promotion_name: pricing.promotion_name,
       p_notes: notesParts.join("\n"),
       p_gifts: pricing.gifts,
-      p_ajuste_valor: 0,
+      p_ajuste_valor: pricing.frete_absorvido,
     });
     if (error) {
       setMessage(error.message);
@@ -1109,6 +1114,12 @@ export default function AdminVendasPage() {
                 <span>Frete cobrado</span>
                 <span>{formatCurrency(freightCharged)}</span>
               </div>
+              {(pricing?.frete_absorvido || 0) > 0 && (
+                <div className="flex justify-between text-amber-800">
+                  <span>Frete na sua conta (est.)</span>
+                  <span>−{formatCurrency(pricing!.frete_absorvido)}</span>
+                </div>
+              )}
               <div className="mt-1 flex justify-between border-t pt-1 font-semibold">
                 <span>Total cliente</span>
                 <span>{formatCurrency(precoFinal)}</span>
@@ -1118,8 +1129,8 @@ export default function AdminVendasPage() {
                 <span>{formatCurrency(lucroEstimado)}</span>
               </div>
               <p className="mt-2 text-xs text-gray-500">
-                Ajuste de frete real (+/−) fica no histórico da venda, depois que
-                ela for concluída.
+                Frete grátis/cupom de frete já reduz o lucro. Depois do envio,
+                ajuste o valor real no histórico da venda se for diferente.
               </p>
             </div>
 
@@ -1328,8 +1339,9 @@ export default function AdminVendasPage() {
                           )}
                           {Number(s.ajuste_valor) !== 0 && (
                             <p>
-                              <span className="text-gray-400">Ajuste:</span>{" "}
-                              {Number(s.ajuste_valor) > 0 ? "+" : ""}
+                              <span className="text-gray-400">
+                                Frete na conta da loja:
+                              </span>{" "}
                               {formatCurrency(Number(s.ajuste_valor))}
                             </p>
                           )}
@@ -1393,11 +1405,13 @@ export default function AdminVendasPage() {
 
                         <div className="rounded-xl border border-dashed border-gray-200 p-3">
                           <p className="mb-1 text-sm font-medium">
-                            Ajuste frete real (após envio)
+                            Frete real pago pela loja
                           </p>
                           <p className="mb-2 text-xs text-gray-500">
-                            + se o frete real ficou mais caro (reduz lucro); − se
-                            ficou mais barato.
+                            Se a cliente ganhou frete grátis (ou parte), o
+                            estimado já entrou no lucro. Depois do envio, coloque
+                            o valor que você pagou de verdade (substitui o
+                            estimado).
                           </p>
                           <div className="flex flex-wrap items-end gap-2">
                             <div className="min-w-[120px] flex-1">

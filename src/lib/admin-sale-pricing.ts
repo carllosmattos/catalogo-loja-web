@@ -18,6 +18,8 @@ export type AdminSalePricing = {
   shipping_promo_discount: number;
   shipping_promo_name: string | null;
   coupon_shipping_discount: number;
+  /** Frete que a loja banca (cliente não pagou) — entra no lucro como custo. */
+  frete_absorvido: number;
   preco_final: number;
   lucro: number;
   promotion_id: string | null;
@@ -84,11 +86,17 @@ export function buildAdminSalePricing(params: {
 
   productSubtotal = Math.max(0, productSubtotal - couponProductDisc);
   const saleFreight = Math.max(0, freightBefore - couponShipDisc);
+  const freightOriginal = Math.max(0, Number(params.freightQuoted) || 0);
+  // Tudo que a cliente não pagou do frete cotado fica na conta da loja
+  const freteAbsorvido = Math.max(
+    0,
+    Math.round((freightOriginal - saleFreight) * 100) / 100
+  );
   const precoFinal = productSubtotal + saleFreight;
 
   const custoTotal =
     (Number(profit.custo_peca) + Number(profit.custo_brindes)) * qty;
-  const lucro = precoFinal - custoTotal;
+  const lucro = precoFinal - custoTotal - freteAbsorvido;
 
   let promotionId: string | null = null;
   if (profit.promotion_name) {
@@ -128,6 +136,7 @@ export function buildAdminSalePricing(params: {
     shipping_promo_discount: shippingPromoDiscount,
     shipping_promo_name: shippingPromoName,
     coupon_shipping_discount: couponShipDisc,
+    frete_absorvido: freteAbsorvido,
     preco_final: precoFinal,
     lucro,
     promotion_id: promotionId,

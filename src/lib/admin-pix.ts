@@ -287,6 +287,17 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
 
+  if (pricing.frete_absorvido > 0) {
+    try {
+      await supabase
+        .from("orders")
+        .update({ frete_absorvido: pricing.frete_absorvido })
+        .eq("id", orderId);
+    } catch {
+      // Migration 037 ainda não aplicada
+    }
+  }
+
   const couponRedeemAmt =
     pricing.desconto_cupom_produto + pricing.coupon_shipping_discount;
   if (coupon?.ok && coupon.code && couponRedeemAmt > 0) {

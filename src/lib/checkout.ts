@@ -15,7 +15,7 @@ import {
 } from "@/lib/payments";
 import { applyShippingPromotion, calculateProfit } from "@/lib/profit";
 import { calculateShipping } from "@/lib/shipping";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { normalizeCpf } from "@/lib/utils";
 import type { Customer, Product } from "@/types";
 
@@ -175,6 +175,21 @@ export async function startPixCheckout(
   const trackingToken = String(orderData.tracking_token);
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
+
+  // Frete que a loja banca (promo/cupom de frete) → lucro na baixa do PIX
+  if (shippingDiscountTotal > 0) {
+    try {
+      const adminDb = await createServiceClient();
+      await adminDb
+        .from("orders")
+        .update({
+          frete_absorvido: Math.round(shippingDiscountTotal * 100) / 100,
+        })
+        .eq("id", orderId);
+    } catch {
+      // Coluna pode não existir até a migration 037
+    }
+  }
 
   if (appliedCode && couponRedeemAmount > 0) {
     await redeemCouponServer(
