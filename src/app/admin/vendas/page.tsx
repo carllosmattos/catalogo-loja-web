@@ -21,6 +21,7 @@ import { formatCurrency, formatCpf, normalizeCpf } from "@/lib/utils";
 import {
   buildAdminPixPaymentMessage,
   buildAdminSaleQuoteMessage,
+  buildMailtoUrl,
   buildWhatsappUrl,
 } from "@/lib/whatsapp";
 import { buildAdminSalePricing } from "@/lib/admin-sale-pricing";
@@ -64,6 +65,7 @@ type PixResult = {
   customer_id?: string;
   customer_name?: string;
   customer_phone?: string;
+  customer_email?: string;
   product_name?: string;
   product_size?: string;
   quantity?: number;
@@ -84,7 +86,6 @@ export default function AdminVendasPage() {
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [storeName, setStoreName] = useState("LM moda feminina");
-  const [whatsappNumber, setWhatsappNumber] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [customerPhone, setCustomerPhone] = useState("");
@@ -224,7 +225,7 @@ export default function AdminVendasPage() {
         supabase.from("product_sizes").select("product_id, size, stock"),
         supabase
           .from("store_settings")
-          .select("store_name, whatsapp_number")
+          .select("store_name")
           .limit(1)
           .maybeSingle(),
         supabase
@@ -255,9 +256,6 @@ export default function AdminVendasPage() {
       }))
     );
     if (settings?.store_name) setStoreName(String(settings.store_name));
-    if (settings?.whatsapp_number) {
-      setWhatsappNumber(String(settings.whatsapp_number));
-    }
     setPromotions((promos as Promotion[]) || []);
   }
 
@@ -469,13 +467,12 @@ export default function AdminVendasPage() {
 
   function shareWhatsApp() {
     if (pixResult?.pix_copy_paste) {
-      const phone =
-        (pixResult.customer_phone || customerPhone).replace(/\D/g, "") ||
-        whatsappNumber;
+      const phone = (pixResult.customer_phone || customerPhone).replace(
+        /\D/g,
+        ""
+      );
       if (!phone) {
-        setMessage(
-          "Informe o WhatsApp do cliente ou configure o da loja em Admin → Loja."
-        );
+        setMessage("Informe o WhatsApp do cliente para enviar o PIX.");
         return;
       }
       const msg = buildAdminPixPaymentMessage({
@@ -497,6 +494,11 @@ export default function AdminVendasPage() {
       setMessage("Selecione o produto antes de compartilhar.");
       return;
     }
+    const phone = customerPhone.replace(/\D/g, "");
+    if (!phone) {
+      setMessage("Informe o WhatsApp do cliente para enviar a mensagem.");
+      return;
+    }
     const msg = buildAdminSaleQuoteMessage({
       storeName,
       productName: selectedProduct.name,
@@ -511,14 +513,52 @@ export default function AdminVendasPage() {
       customerName: form.customer_name || undefined,
       addressText: shippingMethod === "delivery" ? addressText() : undefined,
     });
-    const phone = customerPhone.replace(/\D/g, "") || whatsappNumber;
-    if (!phone) {
-      setMessage(
-        "Informe o WhatsApp do cliente ou configure o da loja em Admin → Loja."
-      );
+    window.open(buildWhatsappUrl(phone, msg), "_blank", "noopener");
+  }
+
+  function shareEmail() {
+    const email = (customerEmail || pixResult?.customer_email || "").trim();
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setMessage("Informe o e-mail do cliente para enviar.");
       return;
     }
-    window.open(buildWhatsappUrl(phone, msg), "_blank", "noopener");
+    let subject = `${storeName} — orçamento`;
+    let body = "";
+    if (pixResult?.pix_copy_paste) {
+      subject = `${storeName} — PIX da sua compra`;
+      body = buildAdminPixPaymentMessage({
+        storeName,
+        customerName: pixResult.customer_name || form.customer_name,
+        productName: String(pixResult.product_name || selectedProduct?.name),
+        size: pixResult.product_size || form.product_size,
+        quantity: Number(pixResult.quantity) || form.quantity,
+        total: Number(pixResult.total),
+        pixCopyPaste: pixResult.pix_copy_paste,
+        trackingUrl: pixResult.tracking_url,
+        shippingMethod:
+          pixResult.shipping_method === "uber" ? "uber" : "delivery",
+      });
+    } else {
+      if (!form.product_id || !selectedProduct) {
+        setMessage("Selecione o produto antes de compartilhar.");
+        return;
+      }
+      body = buildAdminSaleQuoteMessage({
+        storeName,
+        productName: selectedProduct.name,
+        size: form.product_size,
+        quantity: Math.max(1, Number(form.quantity) || 1),
+        productSubtotal,
+        shippingMethod,
+        shippingAmount: freightCharged,
+        shippingLabel: quote?.label,
+        deliveryRange: quote?.delivery_range,
+        total: precoFinal,
+        customerName: form.customer_name || undefined,
+        addressText: shippingMethod === "delivery" ? addressText() : undefined,
+      });
+    }
+    window.open(buildMailtoUrl(email, subject, body), "_blank", "noopener");
   }
 
   async function applyCoupon() {
@@ -601,6 +641,11 @@ export default function AdminVendasPage() {
       setMessage("Para PIX, informe o WhatsApp do cliente com DDD.");
       return;
     }
+    const email = customerEmail.trim();
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setMessage("Para PIX, informe o e-mail do cliente.");
+      return;
+    }
     setPixBusy(true);
     try {
       const res = await fetch("/api/admin/vendas/pix", {
@@ -612,7 +657,7 @@ export default function AdminVendasPage() {
             name: form.customer_name,
             phone: customerPhone,
             cpf: form.customer_cpf,
-            email: customerEmail || undefined,
+            email: customerEmail.trim(),
             address_zip: address.zip,
             address_street: address.street,
             address_number: address.number,
@@ -802,16 +847,23 @@ export default function AdminVendasPage() {
   async function cancelSale(saleId: string) {
     if (!confirm("Cancelar esta venda e devolver estoque?")) return;
     setMessage("");
-    const { error } = await supabase.rpc("cancel_sale", {
-      p_sale_id: saleId,
-    });
-    if (error) {
-      setMessage(error.message);
-      return;
+    try {
+      const res = await fetch("/api/admin/vendas/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(String(data.error || "Não foi possível cancelar."));
+        return;
+      }
+      setMessage("Venda cancelada.");
+      setExpandedId(null);
+      load();
+    } catch {
+      setMessage("Erro de rede ao cancelar venda.");
     }
-    setMessage("Venda cancelada.");
-    setExpandedId(null);
-    load();
   }
 
   const activeSales = sales.filter((s) => !s.cancelled_at);
@@ -859,10 +911,12 @@ export default function AdminVendasPage() {
               placeholder="Com DDD — obrigatório para PIX"
             />
             <AdminInput
-              label="E-mail do cliente (PIX)"
+              label="E-mail do cliente (obrigatório para PIX)"
+              type="email"
               value={customerEmail}
               onChange={(e) => setCustomerEmail(e.target.value)}
-              placeholder="Opcional — se vazio, usamos e-mail técnico"
+              placeholder="cliente@email.com"
+              required
             />
 
             <div>
@@ -1195,6 +1249,14 @@ export default function AdminVendasPage() {
               >
                 WhatsApp
               </AdminButton>
+              <AdminButton
+                type="button"
+                variant="secondary"
+                onClick={shareEmail}
+                disabled={!form.product_id && !pixResult}
+              >
+                E-mail
+              </AdminButton>
             </AdminFormActions>
             <p className="text-xs text-gray-500">
               <strong>Gerar PIX</strong> reserva o estoque e só baixa de verdade
@@ -1263,9 +1325,15 @@ export default function AdminVendasPage() {
                 >
                   Enviar PIX no WhatsApp
                 </AdminButton>
+                <AdminButton
+                  type="button"
+                  variant="secondary"
+                  onClick={shareEmail}
+                >
+                  Enviar PIX por e-mail
+                </AdminButton>
                 <Link
-                  href={`/pedidos/${pixResult.tracking_token}`}
-                  target="_blank"
+                  href={`/admin/pagamentos?order=${pixResult.order_id}`}
                   className="inline-flex items-center rounded-xl border px-4 py-2 text-sm"
                 >
                   Ver pedido

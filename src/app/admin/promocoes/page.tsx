@@ -289,7 +289,18 @@ export default function AdminPromocoesPage() {
                 key={p.id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
               >
-                <div className="min-w-0">
+                {p.banner_url || p.image_urls?.[0] ? (
+                  <img
+                    src={p.banner_url || p.image_urls[0]}
+                    alt=""
+                    className="h-12 w-12 shrink-0 rounded object-cover"
+                  />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-gray-100 text-xs text-gray-400">
+                    —
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
                   <p className="font-medium">{p.name}</p>
                   <p className="text-gray-400">
                     {p.discount_target === "shipping" ? "Frete" : "Produto"} ·{" "}

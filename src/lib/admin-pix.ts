@@ -73,7 +73,9 @@ export async function ensureCustomerForAdminPix(
     );
   }
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    email = `cliente.${cpf}@pix.lm-moda.local`;
+    throw new Error(
+      "Informe o e-mail do cliente para gerar o PIX."
+    );
   }
 
   if (input.id) {
@@ -87,15 +89,9 @@ export async function ensureCustomerForAdminPix(
         name,
         phone,
         cpf,
+        email,
         updated_at: new Date().toISOString(),
       };
-      if (input.email?.trim()) patch.email = email;
-      else if (
-        !byId.email ||
-        !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(byId.email))
-      ) {
-        patch.email = email;
-      }
       if (input.address_zip) {
         patch.address_zip = input.address_zip.replace(/\D/g, "");
         patch.address_street = input.address_street || "";
@@ -128,12 +124,7 @@ export async function ensureCustomerForAdminPix(
       .update({
         name,
         phone,
-        email:
-          input.email?.trim() ||
-          (byCpf.email &&
-          /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(byCpf.email))
-            ? byCpf.email
-            : email),
+        email,
         address_zip: input.address_zip?.replace(/\D/g, "") || byCpf.address_zip,
         address_street: input.address_street || byCpf.address_street,
         address_number: input.address_number || byCpf.address_number,
@@ -370,6 +361,7 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
     customer_id: customer.id,
     customer_name: customer.name,
     customer_phone: customer.phone,
+    customer_email: customer.email,
     product_name: product.name,
     product_size: input.size,
     quantity: qty,

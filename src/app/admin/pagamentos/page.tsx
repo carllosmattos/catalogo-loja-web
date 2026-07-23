@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminButton } from "@/components/admin/AdminUI";
@@ -13,10 +14,28 @@ type OrderRow = Record<string, unknown> & {
   order_items?: Record<string, unknown>[];
 };
 
+function isReissueable(order: OrderRow, payStatus: string | null): boolean {
+  const st = String(order.status || "");
+  if (["cancelled", "canceled", "expired"].includes(st)) return true;
+  if (
+    st === "pending_payment" &&
+    payStatus &&
+    ["cancelled", "canceled", "rejected", "expired"].includes(payStatus)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export default function AdminPagamentosPage() {
+  const searchParams = useSearchParams();
+  const highlightOrder = searchParams.get("order");
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [reissuingId, setReissuingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(
+    highlightOrder || null
+  );
   const [message, setMessage] = useState("");
   const supabase = createClient();
 
@@ -32,6 +51,10 @@ export default function AdminPagamentosPage() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (highlightOrder) setExpandedId(highlightOrder);
+  }, [highlightOrder]);
 
   async function syncOrder(order: OrderRow) {
     const payments = order.payments;
@@ -59,7 +82,9 @@ export default function AdminPagamentosPage() {
           data.message ||
             (st === "approved"
               ? "Pagamento aprovado — venda deve aparecer em Vendas."
-              : `Status: ${st}`)
+              : st === "cancelled" || st === "rejected" || st === "expired"
+                ? "PIX cancelado — pedido marcado como cancelado."
+                : `Status: ${st}`)
         );
       }
       await load();
@@ -67,6 +92,32 @@ export default function AdminPagamentosPage() {
       setMessage("Erro de rede ao sincronizar.");
     } finally {
       setSyncingId(null);
+    }
+  }
+
+  async function reissueOrder(order: OrderRow) {
+    setReissuingId(String(order.id));
+    setMessage("");
+    try {
+      const res = await fetch("/api/admin/orders/reissue-pix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(String(data.error || "Falha ao gerar novo PIX"));
+      } else {
+        setMessage(
+          `Novo PIX gerado (${formatCurrency(Number(data.total) || 0)}). Pedido #${String(data.order_id).slice(0, 8)}.`
+        );
+        setExpandedId(String(data.order_id));
+      }
+      await load();
+    } catch {
+      setMessage("Erro de rede ao gerar novo PIX.");
+    } finally {
+      setReissuingId(null);
     }
   }
 
@@ -79,7 +130,9 @@ export default function AdminPagamentosPage() {
         Lista pedidos online (PIX). Use <strong>Ver detalhes</strong> para ver
         itens e dados do cliente aqui no admin.{" "}
         <strong>Atualizar status</strong> consulta o Mercado Pago quando o
-        webhook atrasou.
+        webhook atrasou.{" "}
+        <strong>Gerar novo PIX</strong> cria um pedido novo se o anterior
+        expirou ou foi cancelado.
       </p>
       {message && (
         <p className="mb-4 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-sm text-gray-700">
@@ -104,11 +157,26 @@ export default function AdminPagamentosPage() {
               const created = o.created_at
                 ? new Date(String(o.created_at)).toLocaleString("pt-BR")
                 : "";
+              const displayOrderStatus =
+                String(o.status) === "pending_payment" &&
+                payStatus &&
+                ["cancelled", "canceled", "rejected", "expired"].includes(
+                  payStatus
+                )
+                  ? "cancelled"
+                  : String(o.status);
+              const showReissue = isReissueable(o, payStatus);
+              const highlight = highlightOrder === String(o.id);
 
               return (
                 <li
                   key={String(o.id)}
-                  className="rounded-lg border p-4 text-sm"
+                  id={`order-${o.id}`}
+                  className={`rounded-lg border p-4 text-sm ${
+                    highlight
+                      ? "border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]"
+                      : ""
+                  }`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
@@ -117,7 +185,7 @@ export default function AdminPagamentosPage() {
                         {String(o.customer_name || "Cliente")}
                       </p>
                       <p className="text-gray-500">
-                        Pedido: {orderStatusLabel(String(o.status))} ·{" "}
+                        Pedido: {orderStatusLabel(displayOrderStatus)} ·{" "}
                         {formatCurrency(Number(o.total_amount))}
                       </p>
                       {payStatus && (
@@ -162,6 +230,17 @@ export default function AdminPagamentosPage() {
                           ? "Atualizando…"
                           : "Atualizar status"}
                       </AdminButton>
+                      {showReissue && (
+                        <AdminButton
+                          type="button"
+                          disabled={reissuingId === String(o.id)}
+                          onClick={() => reissueOrder(o)}
+                        >
+                          {reissuingId === String(o.id)
+                            ? "Gerando…"
+                            : "Gerar novo PIX"}
+                        </AdminButton>
+                      )}
                     </div>
                   </div>
 
@@ -238,7 +317,14 @@ export default function AdminPagamentosPage() {
                         </p>
                       )}
 
-                      {payment?.pix_copy_paste ? (
+                      {payment?.pix_copy_paste &&
+                      String(o.status) === "pending_payment" &&
+                      !(
+                        payStatus &&
+                        ["cancelled", "canceled", "rejected", "expired"].includes(
+                          payStatus
+                        )
+                      ) ? (
                         <p className="break-all text-xs text-gray-400">
                           PIX: {String(payment.pix_copy_paste).slice(0, 80)}…
                         </p>

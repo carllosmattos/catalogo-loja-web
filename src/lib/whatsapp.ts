@@ -7,6 +7,18 @@ export function buildWhatsappUrl(whatsappNumber: string, message: string): strin
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
+/** Abre o cliente de e-mail com assunto e corpo prontos. */
+export function buildMailtoUrl(
+  email: string,
+  subject: string,
+  body: string
+): string {
+  const to = String(email || "").trim();
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(body)}`;
+}
+
 /** Mensagem padrão de atendimento (home / float). */
 export function buildAttendMessage(storeName: string): string {
   return [
@@ -81,7 +93,7 @@ export function buildCartMessage(
     lines.push(`   Qtd: ${qty}`);
     lines.push(`   Preço unit.: ${formatCurrency(unitFinal)}`);
     if (item.promotion_name && Number(item.desconto) > 0) {
-      lines.push(`   Promo: ${item.promotion_name} (−${formatCurrency(Number(item.desconto))}/un.)`);
+      lines.push(`   Promo: ${item.promotion_name} (-${formatCurrency(Number(item.desconto))}/un.)`);
     }
     lines.push(`   Subtotal: ${formatCurrency(subtotal)}`, "");
   });
@@ -155,7 +167,7 @@ export function buildAdminSaleQuoteMessage(params: {
   }
 
   lines.push("", `TOTAL: ${formatCurrency(params.total)}`, "");
-  lines.push("Qualquer dúvida, me chama aqui 💕");
+  lines.push("Qualquer dúvida, me chama aqui!");
   return lines.join("\n");
 }
 
@@ -190,7 +202,7 @@ export function buildAdminPixPaymentMessage(params: {
   if (params.trackingUrl) {
     lines.push(`Acompanhar pedido: ${params.trackingUrl}`, "");
   }
-  lines.push("Assim que pagar, a gente confirma por aqui 💕");
+  lines.push("Assim que pagar, a gente confirma por aqui!");
   return lines.join("\n");
 }
 
@@ -219,6 +231,6 @@ export function buildAdminPixMessage(params: {
   if (params.trackingUrl) {
     lines.push("", `Acompanhar pedido: ${params.trackingUrl}`);
   }
-  lines.push("", "Válido por cerca de 15 minutos. Qualquer dúvida, me chama 💕");
+  lines.push("", "Válido por cerca de 15 minutos. Qualquer dúvida, me chama!");
   return lines.join("\n");
 }

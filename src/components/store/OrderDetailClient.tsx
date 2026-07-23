@@ -37,6 +37,12 @@ function normalizeBundle(
   return null;
 }
 
+function isTerminalPayStatus(status: string): boolean {
+  return ["cancelled", "canceled", "rejected", "expired"].includes(
+    status.toLowerCase()
+  );
+}
+
 interface OrderDetailClientProps {
   settings: StoreSettings;
   token: string;
@@ -53,8 +59,15 @@ export function OrderDetailClient({
   const [bundle, setBundle] = useState(() => normalizeBundle(initialOrder));
   const [copied, setCopied] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [busy, setBusy] = useState<"cancel" | "delete" | "refund" | null>(null);
+  const [busy, setBusy] = useState<
+    "cancel" | "delete" | "refund" | "reissue" | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reissueResult, setReissueResult] = useState<{
+    tracking_url: string;
+    pix_copy_paste: string;
+    total: number;
+  } | null>(null);
 
   async function refresh() {
     const supabase = createClient();
@@ -114,6 +127,41 @@ export function OrderDetailClient({
     await refresh();
   }
 
+  async function reissuePix() {
+    if (!bundle?.order?.id || !customer?.id || busy) return;
+    setBusy("reissue");
+    setActionError(null);
+    setReissueResult(null);
+    try {
+      const res = await fetch("/api/orders/reissue-pix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: bundle.order.id,
+          customerId: customer.id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(String(data.error || "Não foi possível gerar novo PIX."));
+        return;
+      }
+      setReissueResult({
+        tracking_url: String(data.tracking_url || ""),
+        pix_copy_paste: String(data.pix_copy_paste || ""),
+        total: Number(data.total) || 0,
+      });
+      if (data.tracking_token) {
+        router.push(`/pedidos/${data.tracking_token}`);
+        router.refresh();
+      }
+    } catch {
+      setActionError("Erro de rede ao gerar novo PIX.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function deleteOrder() {
     if (!bundle?.order?.id || !customer?.id || busy) return;
     const ok = window.confirm(
@@ -166,13 +214,20 @@ export function OrderDetailClient({
 
   const status = String(bundle?.order?.status || "");
   const paymentStatus = String(bundle?.payment?.status || "");
+  const payDead = isTerminalPayStatus(paymentStatus);
+  const showActivePix =
+    status === "pending_payment" && !payDead && Boolean(bundle?.payment?.pix_copy_paste);
+  const canReissue =
+    Boolean(customer?.id) &&
+    (["cancelled", "canceled", "expired"].includes(status) ||
+      (status === "pending_payment" && payDead));
 
   useEffect(() => {
-    if (status === "pending_payment") {
+    if (status === "pending_payment" && !payDead) {
       const interval = setInterval(syncPayment, 15000);
       return () => clearInterval(interval);
     }
-  }, [status]);
+  }, [status, payDead]);
 
   if (!bundle) {
     return (
@@ -190,6 +245,8 @@ export function OrderDetailClient({
 
   const { order, items, payment } = bundle;
   const pixCode = String(payment?.pix_copy_paste || "");
+  const displayStatus =
+    status === "pending_payment" && payDead ? "cancelled" : status;
 
   return (
     <>
@@ -203,18 +260,20 @@ export function OrderDetailClient({
             Pedido #{String(order.id).slice(0, 8)}
           </h1>
           <p className="text-sm text-gray-500">
-            Status: {orderStatusLabel(status)}
+            Status: {orderStatusLabel(displayStatus)}
           </p>
-          {paymentStatus && paymentStatus !== status && (
-            <p className="text-xs text-gray-400">
-              Pagamento: {orderStatusLabel(paymentStatus)}
-            </p>
-          )}
+          {paymentStatus &&
+            paymentStatus !== displayStatus &&
+            !payDead && (
+              <p className="text-xs text-gray-400">
+                Pagamento: {orderStatusLabel(paymentStatus)}
+              </p>
+            )}
           <p className="mt-2 text-2xl font-bold text-[var(--color-primary)]">
             {formatCurrency(Number(order.total_amount))}
           </p>
 
-          {status === "pending_payment" && pixCode && (
+          {showActivePix && pixCode && (
             <div className="mt-4 rounded-2xl bg-[var(--color-accent)] p-4">
               <p className="text-sm font-medium">PIX Copia e Cola</p>
               <div className="mt-2 flex gap-2">
@@ -250,6 +309,17 @@ export function OrderDetailClient({
             </div>
           )}
 
+          {reissueResult && (
+            <div className="mt-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+              Novo PIX gerado ({formatCurrency(reissueResult.total)}).{" "}
+              {reissueResult.tracking_url && (
+                <a href={reissueResult.tracking_url} className="underline">
+                  Abrir pedido novo
+                </a>
+              )}
+            </div>
+          )}
+
           {items.length > 0 && (
             <ul className="mt-4 space-y-2">
               {items.map((item, i) => (
@@ -266,7 +336,17 @@ export function OrderDetailClient({
           )}
 
           <div className="mt-6 flex flex-col gap-2">
-            {status === "pending_payment" && customer && (
+            {canReissue && (
+              <button
+                type="button"
+                onClick={reissuePix}
+                disabled={Boolean(busy)}
+                className="rounded-full bg-[var(--color-primary)] py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {busy === "reissue" ? "Gerando…" : "Gerar novo PIX"}
+              </button>
+            )}
+            {status === "pending_payment" && !payDead && customer && (
               <button
                 type="button"
                 onClick={cancelOrder}
@@ -295,6 +375,15 @@ export function OrderDetailClient({
               >
                 {busy === "delete" ? "Excluindo..." : "Excluir da minha lista"}
               </button>
+            )}
+            {canReissue && !customer && (
+              <p className="text-xs text-amber-700">
+                Entre em{" "}
+                <Link href="/conta" className="underline">
+                  Minha conta
+                </Link>{" "}
+                para gerar um novo PIX deste pedido.
+              </p>
             )}
           </div>
         </div>
