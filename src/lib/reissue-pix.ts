@@ -45,6 +45,13 @@ export async function reissuePixFromOrder(params: {
   }
 
   const supabase = await createServiceClient();
+
+  try {
+    await supabase.rpc("expire_stale_orders");
+  } catch {
+    // ignore
+  }
+
   const { data: order, error: orderErr } = await supabase
     .from("orders")
     .select("*, order_items(*), payments(*)")

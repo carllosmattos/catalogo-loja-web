@@ -10,6 +10,7 @@ import {
 } from "@/lib/coupons-server";
 import {
   appBaseUrl,
+  cancelPayment,
   createPixCheckout,
   extractPixQrBase64,
   paymentsEnabled,
@@ -168,17 +169,60 @@ export async function ensureCustomerForAdminPix(
 
 async function cancelPendingOrdersForCustomer(customerId: string) {
   const supabase = await createServiceClient();
+
+  // Libera reservas expiradas antes de tentar novo PIX
+  try {
+    await supabase.rpc("expire_stale_orders");
+  } catch {
+    // ignore se RPC antiga
+  }
+
   const { data: pending } = await supabase
     .from("orders")
-    .select("id")
+    .select("id, payments(provider_payment_id, status)")
     .eq("customer_id", customerId)
     .eq("status", "pending_payment");
 
   for (const row of pending || []) {
-    await supabase.rpc("cancel_unpaid_order", {
+    const payments = Array.isArray(row.payments) ? row.payments : [];
+    for (const p of payments) {
+      const pid = p?.provider_payment_id
+        ? String(p.provider_payment_id)
+        : "";
+      const st = String(p?.status || "");
+      if (pid && ["pending", "in_process"].includes(st)) {
+        try {
+          await cancelPayment(pid);
+        } catch {
+          // ignore MP
+        }
+      }
+    }
+
+    const { error } = await supabase.rpc("cancel_unpaid_order", {
       p_order_id: row.id,
       p_customer_id: customerId,
     });
+    if (error) {
+      // Fallback: liberar reservas direto se a RPC falhar
+      await supabase
+        .from("stock_reservations")
+        .delete()
+        .eq("order_id", row.id);
+      await supabase
+        .from("orders")
+        .update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq("id", row.id)
+        .eq("status", "pending_payment");
+      await supabase
+        .from("payments")
+        .update({ status: "cancelled" })
+        .eq("order_id", row.id)
+        .in("status", ["pending", "in_process"]);
+    }
   }
 }
 

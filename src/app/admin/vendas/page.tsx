@@ -124,6 +124,8 @@ export default function AdminVendasPage() {
   const [cpfHint, setCpfHint] = useState<string | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
   const [message, setMessage] = useState("");
+  /** Estoque disponível = físico − reservas PIX (15 min). */
+  const [availableStock, setAvailableStock] = useState<number | null>(null);
   const nameFromLookup = useRef(false);
   const supabase = createClient();
 
@@ -139,10 +141,15 @@ export default function AdminVendasPage() {
     );
   }, [selectedProduct]);
 
-  const maxQty = useMemo(() => {
+  const physicalStock = useMemo(() => {
     if (!selectedProduct || !form.product_size) return 0;
     return selectedProduct.sizes[form.product_size] || 0;
   }, [selectedProduct, form.product_size]);
+
+  const maxQty = useMemo(() => {
+    if (availableStock != null) return Math.max(0, availableStock);
+    return physicalStock;
+  }, [availableStock, physicalStock]);
 
   const productAsCatalog: Product | null = selectedProduct
     ? ({
@@ -207,6 +214,40 @@ export default function AdminVendasPage() {
     form.quantity >= 1 &&
     form.quantity <= maxQty &&
     !(shippingMethod === "delivery" && quote?.blocked);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const aviso = new URLSearchParams(window.location.search).get("aviso");
+    if (aviso === "loja") {
+      setMessage(
+        "Você está no admin — use Vendas e Pagamentos. A loja (catálogo/carrinho/pedidos do site) é só para clientes."
+      );
+      window.history.replaceState({}, "", "/admin/vendas");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!form.product_id || !form.product_size) {
+      setAvailableStock(null);
+      return;
+    }
+    let cancelled = false;
+    const sb = createClient();
+    sb.rpc("available_product_stock", {
+      p_product_id: form.product_id,
+      p_size: form.product_size,
+    }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) {
+        setAvailableStock(null);
+        return;
+      }
+      setAvailableStock(Math.max(0, Number(data) || 0));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.product_id, form.product_size]);
 
   async function load() {
     const now = new Date().toISOString();
@@ -963,13 +1004,23 @@ export default function AdminVendasPage() {
                         <option value="">Selecione</option>
                         {availableSizes.map(({ size, stock }) => (
                           <option key={size} value={size}>
-                            {SIZE_LABELS[size]} — {stock} em estoque
+                            {SIZE_LABELS[size]} — {stock} físico
+                            {form.product_size === size &&
+                            availableStock != null &&
+                            availableStock !== stock
+                              ? ` · ${availableStock} disponível`
+                              : ""}
                           </option>
                         ))}
                       </select>
                     </div>
                     <AdminInput
-                      label={`Quantidade (máx. ${maxQty})`}
+                      label={`Quantidade (máx. ${maxQty}${
+                        availableStock != null &&
+                        physicalStock > availableStock
+                          ? ` · ${physicalStock - availableStock} em PIX pendente`
+                          : ""
+                      })`}
                       type="number"
                       min={1}
                       max={maxQty}
@@ -1259,8 +1310,9 @@ export default function AdminVendasPage() {
               </AdminButton>
             </AdminFormActions>
             <p className="text-xs text-gray-500">
-              <strong>Gerar PIX</strong> reserva o estoque e só baixa de verdade
-              quando pagar (como no site).{" "}
+              <strong>Gerar PIX</strong> reserva o estoque por 15 minutos e só
+              baixa de verdade quando pagar (como no site). Se não pagar, a
+              reserva libera sozinha.{" "}
               <strong>Registrar sem PIX</strong> é para dinheiro/já pago —
               efetiva na hora.
             </p>

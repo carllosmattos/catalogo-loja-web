@@ -71,12 +71,6 @@ export default async function AdminLayout({
               {label}
             </Link>
           ))}
-          <Link
-            href="/"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-400"
-          >
-            ← Loja
-          </Link>
         </nav>
       </aside>
       <div className="flex-1">
