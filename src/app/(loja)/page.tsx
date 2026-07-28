@@ -1,6 +1,6 @@
 import {
   fetchActivePromotions,
-  fetchProductsPage,
+  fetchFeaturedProducts,
   fetchStoreBanners,
   fetchStoreSettings,
 } from "@/lib/catalog";
@@ -13,11 +13,11 @@ import { STORE_MAIN, PRODUCT_GRID } from "@/lib/store-layout";
 import { buildAttendMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 
 export default async function HomePage() {
-  const [settings, promotions, banners, { products }] = await Promise.all([
+  const [settings, promotions, banners, products] = await Promise.all([
     fetchStoreSettings(),
     fetchActivePromotions(),
     fetchStoreBanners(),
-    fetchProductsPage({ perPage: 6 }),
+    fetchFeaturedProducts(6),
   ]);
 
   const bannerUrls = banners.length
@@ -62,13 +62,22 @@ export default async function HomePage() {
             </Link>
           </div>
           <div className={PRODUCT_GRID}>
-            {products.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                promotions={promotions}
-              />
-            ))}
+            {products.length === 0 ? (
+              <p className="col-span-full text-sm text-gray-400">
+                Nenhum destaque no momento.{" "}
+                <Link href="/catalogo" className="underline">
+                  Ver catálogo
+                </Link>
+              </p>
+            ) : (
+              products.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  promotions={promotions}
+                />
+              ))
+            )}
           </div>
         </section>
 

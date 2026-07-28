@@ -54,6 +54,8 @@ export interface Product {
   sale_freight: number;
   stock: number;
   active: boolean;
+  is_featured?: boolean;
+  featured_at?: string | null;
   sizes?: SizeStock[];
   created_at?: string;
   /** Brindes vinculados (catálogo / cards) */

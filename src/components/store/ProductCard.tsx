@@ -10,7 +10,7 @@ import {
   hasFreeShippingPromo,
   productDiscountPercent,
 } from "@/lib/deals";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import { totalStock } from "@/lib/sizes";
 
 interface ProductCardProps {
@@ -38,20 +38,25 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
   const offPct = productDiscountPercent(listPrice, profit.desconto);
   const freeShipping = hasFreeShippingPromo(promotions);
   const gifts = product.linked_gifts || [];
-  const giftPreview = gifts[0];
+  const giftPreview = !soldOut ? gifts[0] : undefined;
 
-  return (
-    <Link
-      href={`/produto/${product.id}`}
-      className="group animate-fade-in rounded-2xl bg-white shadow-sm ring-1 ring-black/5 transition-shadow hover:shadow-md"
-    >
-      <div className="relative aspect-[3/4] overflow-visible bg-[var(--color-accent)]">
-        <div className="absolute inset-0 overflow-hidden rounded-t-2xl">
+  const body = (
+    <>
+      <div
+        className={cn(
+          "relative aspect-[3/4] bg-[var(--color-accent)]",
+          soldOut ? "overflow-hidden" : "overflow-visible"
+        )}
+      >
+        <div className="absolute inset-0 overflow-hidden">
           {image ? (
             <img
               src={image}
               alt={product.name}
-              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+              className={cn(
+                "h-full w-full object-cover transition-transform duration-300",
+                !soldOut && "group-hover:scale-105"
+              )}
             />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-gray-300">
@@ -59,13 +64,15 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
             </div>
           )}
           {soldOut && (
-            <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-sm font-semibold text-white">
-              Esgotado
+            <span className="absolute inset-0 flex items-center justify-center bg-black/55">
+              <span className="rounded-full bg-black/70 px-4 py-2 text-base font-extrabold uppercase tracking-wide text-white shadow-lg sm:text-lg">
+                Esgotado
+              </span>
             </span>
           )}
         </div>
 
-        {profit.promotion_name && profit.desconto > 0 && (
+        {profit.promotion_name && profit.desconto > 0 && !soldOut && (
           <span
             className="absolute left-2 top-2 z-10 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
             style={{ backgroundColor: PROMO_YELLOW }}
@@ -146,7 +153,7 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
           </p>
         )}
 
-        {freeShipping && (
+        {freeShipping && !soldOut && (
           <p className="text-xs font-bold" style={{ color: DEAL_GREEN }}>
             Frete grátis
           </p>
@@ -156,6 +163,30 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
           <p className="text-[10px] text-gray-400">{product.category}</p>
         )}
       </div>
+    </>
+  );
+
+  const shellClass =
+    "group block rounded-2xl bg-white shadow-sm ring-1 ring-black/5 overflow-hidden transition-shadow";
+
+  if (soldOut) {
+    return (
+      <div
+        className={cn(shellClass, "cursor-not-allowed opacity-95")}
+        aria-disabled="true"
+        title="Produto esgotado"
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href={`/produto/${product.id}`}
+      className={cn(shellClass, "hover:shadow-md")}
+    >
+      {body}
     </Link>
   );
 }

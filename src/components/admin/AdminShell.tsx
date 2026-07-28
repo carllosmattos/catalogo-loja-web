@@ -21,6 +21,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 type NavChild = { href: string, label: string };
 type NavItem =
@@ -356,6 +357,16 @@ export function AdminShell({
             <NavLinks collapsed={sidebarCollapsed} />
           </div>
           <div className="mt-2 shrink-0 border-t pt-2">
+            {!sidebarCollapsed && (
+              <div className="mb-1 flex justify-center px-2">
+                <NotificationBell mode="admin" />
+              </div>
+            )}
+            {sidebarCollapsed && (
+              <div className="mb-1 flex justify-center">
+                <NotificationBell mode="admin" />
+              </div>
+            )}
             <LogoutButton
               className={cn("w-full", sidebarCollapsed && "justify-center")}
               iconOnly={sidebarCollapsed}
@@ -377,14 +388,17 @@ export function AdminShell({
               />
             </Link>
           </div>
-          <button
-            type="button"
-            onClick={() => setMenuOpen(true)}
-            className="shrink-0 rounded-lg p-2 text-gray-700 hover:bg-gray-100"
-            aria-label="Abrir menu"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <NotificationBell mode="admin" />
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="shrink-0 rounded-lg p-2 text-gray-700 hover:bg-gray-100"
+              aria-label="Abrir menu"
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+          </div>
         </header>
 
         {menuOpen && (

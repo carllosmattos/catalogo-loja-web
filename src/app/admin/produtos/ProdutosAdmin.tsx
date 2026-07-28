@@ -80,6 +80,8 @@ export default function ProdutosAdmin({
     new_image: "",
     sizes: Object.fromEntries(SIZES.map((s) => [s, 0])) as Record<string, number>,
     gift_links: [] as GiftLinkForm[],
+    is_featured: false,
+    featured_at: null as string | null,
   });
   const [stockForm, setStockForm] = useState({
     size: "M",
@@ -232,6 +234,8 @@ export default function ProdutosAdmin({
       new_image: "",
       sizes: Object.fromEntries(SIZES.map((s) => [s, 0])),
       gift_links: [],
+      is_featured: false,
+      featured_at: null,
     });
     setStockForm({ size: "M", mode: "in", quantity: 1, reason: "" });
     setMovements([]);
@@ -275,7 +279,7 @@ export default function ProdutosAdmin({
     if (form.new_image && !images.includes(form.new_image)) {
       images.push(form.new_image);
     }
-    const payload = {
+    const payload: Record<string, unknown> = {
       name: form.name,
       description: form.description,
       category_id: form.category_id || null,
@@ -286,6 +290,10 @@ export default function ProdutosAdmin({
       sale_freight: form.sale_freight,
       image_urls: images,
       active: true,
+      is_featured: form.is_featured,
+      featured_at: form.is_featured
+        ? form.featured_at || new Date().toISOString()
+        : null,
     };
     let productId = editing;
     if (editing) {
@@ -359,6 +367,8 @@ export default function ProdutosAdmin({
         gift_id: String(l.gift_id),
         quantity_per_sale: Number(l.quantity_per_sale) || 1,
       })),
+      is_featured: Boolean(p.is_featured),
+      featured_at: p.featured_at || null,
     });
     setStockForm({ size: "M", mode: "in", quantity: 1, reason: "" });
     await loadMovements(p.id);
@@ -573,6 +583,30 @@ export default function ProdutosAdmin({
                   </p>
                 </div>
               )}
+
+              <label className="flex items-start gap-3 rounded-xl border border-gray-100 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={form.is_featured}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      is_featured: e.target.checked,
+                      featured_at: e.target.checked
+                        ? new Date().toISOString()
+                        : null,
+                    })
+                  }
+                />
+                <span>
+                  <span className="font-medium">Destaque na home</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">
+                    Aparece em Destaques. Se houver mais de 6, o cliente vê só os
+                    6 marcados mais recentemente.
+                  </span>
+                </span>
+              </label>
 
               <div className="space-y-2 rounded-xl border border-gray-100 p-3">
                 <p className="text-sm font-medium">Brindes vinculados</p>
@@ -849,6 +883,7 @@ export default function ProdutosAdmin({
                         <p className="text-gray-400">
                           {formatCurrency(Number(p.sale_price))} · Estoque{" "}
                           {total} · {p.active ? "Ativo" : "Inativo"}
+                          {p.is_featured ? " · Destaque" : ""}
                         </p>
                       </div>
                     </div>

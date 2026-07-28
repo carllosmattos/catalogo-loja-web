@@ -164,7 +164,7 @@ export function ProductDetailClient({
           ) && (
             <p className="mt-1 text-sm font-bold text-[#00A650]">Frete grátis</p>
           )}
-          {gifts.some((g) => g.gift_data?.id) && (
+          {profit.stock > 0 && gifts.some((g) => g.gift_data?.id) && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {gifts.map((link, i) => {
                 const g = link.gift_data as GiftPreview | undefined;

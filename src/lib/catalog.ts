@@ -52,6 +52,27 @@ export async function fetchCategories(): Promise<Category[]> {
   return data || [];
 }
 
+export async function fetchFeaturedProducts(
+  limit = 6
+): Promise<Product[]> {
+  const supabase = await getClient();
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("active", true)
+    .eq("is_featured", true)
+    .order("featured_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(1, limit));
+  if (error) {
+    // Fallback se migration 042 ainda não rodou
+    const fallback = await fetchProductsPage({ perPage: limit });
+    return fallback.products;
+  }
+  const withSizes = await attachSizes(data || []);
+  return attachGifts(withSizes);
+}
+
 export async function fetchProductsPage(params: {
   categoryId?: string;
   page?: number;
