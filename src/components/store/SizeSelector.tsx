@@ -24,11 +24,11 @@ export function SizeSelector({ sizes, selected, onChange }: SizeSelectorProps) {
             disabled={disabled}
             onClick={() => onChange(size)}
             className={cn(
-              "min-w-[3rem] rounded-full border px-4 py-2 text-sm font-medium transition-colors",
+              "min-w-[3rem] rounded-full border px-4 py-2 text-sm font-medium transition-all duration-200",
               selected === size
-                ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
-                : "border-gray-200 bg-white text-gray-700 hover:border-[var(--color-primary)]",
-              disabled && "cursor-not-allowed opacity-40"
+                ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white shadow-sm"
+                : "border-gray-200 bg-white text-gray-700 hover:border-[var(--color-primary)] hover:bg-[var(--color-accent)] hover:shadow-sm active:scale-95",
+              disabled && "cursor-not-allowed opacity-40 hover:border-gray-200 hover:bg-white hover:shadow-none"
             )}
           >
             {SIZE_LABELS[size]}

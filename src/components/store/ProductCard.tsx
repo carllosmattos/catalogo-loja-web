@@ -12,6 +12,7 @@ import {
 } from "@/lib/deals";
 import { formatCurrency, cn } from "@/lib/utils";
 import { totalStock } from "@/lib/sizes";
+import { STORE_CARD } from "@/lib/store-layout";
 
 interface ProductCardProps {
   product: Product;
@@ -54,8 +55,8 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
               src={image}
               alt={product.name}
               className={cn(
-                "h-full w-full object-cover transition-transform duration-300",
-                !soldOut && "group-hover:scale-105"
+                "h-full w-full object-cover transition-transform duration-500 ease-out",
+                !soldOut && "group-hover:scale-110"
               )}
             />
           ) : (
@@ -166,13 +167,16 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
     </>
   );
 
-  const shellClass =
-    "group block rounded-2xl bg-white shadow-sm ring-1 ring-black/5 overflow-hidden transition-shadow";
+  const shellClass = cn(
+    "group block overflow-hidden",
+    STORE_CARD,
+    "animate-fade-in"
+  );
 
   if (soldOut) {
     return (
       <div
-        className={cn(shellClass, "cursor-not-allowed opacity-95")}
+        className={cn(shellClass, "cursor-not-allowed opacity-95 shadow-sm hover:translate-y-0 hover:shadow-sm hover:ring-black/5")}
         aria-disabled="true"
         title="Produto esgotado"
       >
@@ -182,10 +186,7 @@ export function ProductCard({ product, promotions }: ProductCardProps) {
   }
 
   return (
-    <Link
-      href={`/produto/${product.id}`}
-      className={cn(shellClass, "hover:shadow-md")}
-    >
+    <Link href={`/produto/${product.id}`} className={shellClass}>
       {body}
     </Link>
   );

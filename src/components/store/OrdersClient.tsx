@@ -5,10 +5,10 @@ import Link from "next/link";
 import { StoreHeader } from "@/components/store/StoreHeader";
 import { useCustomerStore } from "@/stores";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import { orderStatusLabel } from "@/lib/order-status";
 import type { StoreSettings } from "@/types";
-import { STORE_MAIN } from "@/lib/store-layout";
+import { STORE_MAIN, STORE_CARD } from "@/lib/store-layout";
 
 interface OrderRow {
   id: string;
@@ -93,7 +93,7 @@ export function OrdersClient({ settings }: OrdersClientProps) {
               <Link
                 key={order.id}
                 href={`/pedidos/${order.tracking_token}`}
-                className="block rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5"
+                className={cn("block p-4", STORE_CARD)}
               >
                 <div className="flex justify-between">
                   <span className="text-sm font-medium">

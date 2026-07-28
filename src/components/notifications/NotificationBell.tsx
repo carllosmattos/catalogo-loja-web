@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Bell, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { STORE_ICON_BTN } from "@/lib/store-layout";
 
 export type AppNotification = {
   id: string;
@@ -306,8 +307,9 @@ export function NotificationBell({
           setOpen(true);
         }}
         className={cn(
-          "relative rounded-full p-2 text-[var(--color-primary)] hover:bg-[var(--color-accent)]",
-          disabled && "cursor-not-allowed opacity-40",
+          "relative",
+          STORE_ICON_BTN,
+          disabled && "cursor-not-allowed opacity-40 hover:scale-100",
           className
         )}
         aria-label="Notificações"

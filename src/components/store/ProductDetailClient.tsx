@@ -4,14 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Product, ProfitResult, Promotion, StoreSettings } from "@/types";
 import { SizeSelector } from "./SizeSelector";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import type { ProductSize } from "@/types";
 import { normalizeSize } from "@/lib/sizes";
 import { useCartStore } from "@/stores";
 import { buildOrderMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 import { calculateProfit } from "@/lib/profit";
 import { ShoppingBag, X } from "lucide-react";
-import { STORE_MAIN } from "@/lib/store-layout";
+import { STORE_MAIN, STORE_BTN_PRIMARY } from "@/lib/store-layout";
 
 interface GiftPreview {
   id?: string;
@@ -218,7 +218,7 @@ export function ProductDetailClient({
               type="button"
               onClick={handleAddToCart}
               disabled={profit.stock <= 0 || !profit.gift_stock_ok}
-              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-primary)] py-3.5 text-sm font-semibold text-white disabled:opacity-50 md:py-4 md:text-base"
+              className={cn("flex-1 md:py-4 md:text-base", STORE_BTN_PRIMARY)}
             >
               <ShoppingBag className="h-5 w-5" />
               Adicionar ao carrinho
@@ -228,7 +228,7 @@ export function ProductDetailClient({
                 href={waUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex flex-1 items-center justify-center gap-2 rounded-full border-2 border-[#25D366] py-3.5 text-sm font-semibold text-[#25D366] md:py-4 md:text-base"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border-2 border-[#25D366] bg-white px-6 py-3.5 text-sm font-semibold text-[#25D366] shadow-sm transition-all duration-200 hover:bg-[#25D366]/10 hover:shadow-md active:scale-[0.98] md:py-4 md:text-base"
               >
                 <img src="/icons/whatsapp.svg" alt="" className="h-5 w-5" />
                 WhatsApp
@@ -237,7 +237,7 @@ export function ProductDetailClient({
           </div>
           <Link
             href="/carrinho"
-            className="mt-3 inline-block text-sm text-[var(--color-primary)] underline"
+            className="mt-3 inline-block rounded-full px-2 py-1 text-sm text-[var(--color-primary)] underline decoration-[var(--color-primary)]/40 underline-offset-2 transition-all hover:bg-[var(--color-accent)] hover:decoration-[var(--color-primary)] active:scale-95"
           >
             Ver carrinho
           </Link>
@@ -313,7 +313,7 @@ export function ProductDetailClient({
               <button
                 type="button"
                 onClick={() => setGiftModal(null)}
-                className="w-full rounded-full bg-[var(--color-primary)] py-3 text-sm font-semibold text-white"
+                className={cn("w-full", STORE_BTN_PRIMARY)}
               >
                 Fechar
               </button>

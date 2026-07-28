@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { StoreHeader } from "@/components/store/StoreHeader";
 import { useCustomerStore } from "@/stores";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import { orderStatusLabel } from "@/lib/order-status";
 import {
   REFUND_REASON_OPTIONS,
@@ -14,7 +14,7 @@ import {
 } from "@/lib/refunds";
 import { Copy, Check, RefreshCw } from "lucide-react";
 import type { StoreSettings } from "@/types";
-import { STORE_MAIN } from "@/lib/store-layout";
+import { STORE_MAIN, STORE_BTN_PRIMARY, STORE_BTN_OUTLINE } from "@/lib/store-layout";
 
 interface OrderBundle {
   order: Record<string, unknown>;
@@ -365,7 +365,7 @@ export function OrderDetailClient({
                 type="button"
                 onClick={reissuePix}
                 disabled={Boolean(busy)}
-                className="rounded-full bg-[var(--color-primary)] py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className={cn("py-2", STORE_BTN_PRIMARY)}
               >
                 {busy === "reissue" ? "Gerando…" : "Gerar novo PIX"}
               </button>
@@ -375,7 +375,7 @@ export function OrderDetailClient({
                 type="button"
                 onClick={cancelOrder}
                 disabled={Boolean(busy)}
-                className="rounded-full border border-red-300 py-2 text-sm text-red-600 disabled:opacity-50"
+                className="rounded-full border border-red-300 py-2 text-sm text-red-600 transition-all duration-200 hover:bg-red-50 hover:shadow-sm active:scale-[0.98] disabled:opacity-50"
               >
                 {busy === "cancel" ? "Cancelando..." : "Cancelar pedido"}
               </button>
@@ -390,7 +390,7 @@ export function OrderDetailClient({
                       setActionError(null);
                     }}
                     disabled={Boolean(busy)}
-                    className="rounded-full border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
+                    className={cn("py-2", STORE_BTN_OUTLINE)}
                   >
                     Solicitar reembolso / devolução
                   </button>
@@ -464,7 +464,7 @@ export function OrderDetailClient({
                         type="button"
                         onClick={requestRefund}
                         disabled={Boolean(busy) || !refundAck}
-                        className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        className={cn("px-4 py-2", STORE_BTN_PRIMARY)}
                       >
                         {busy === "refund" ? "Enviando…" : "Enviar solicitação"}
                       </button>
@@ -472,7 +472,7 @@ export function OrderDetailClient({
                         type="button"
                         onClick={() => setRefundOpen(false)}
                         disabled={Boolean(busy)}
-                        className="rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-600"
+                        className={cn("px-4 py-2", STORE_BTN_OUTLINE)}
                       >
                         Cancelar
                       </button>
@@ -500,7 +500,7 @@ export function OrderDetailClient({
                 type="button"
                 onClick={deleteOrder}
                 disabled={Boolean(busy)}
-                className="rounded-full border border-gray-300 py-2 text-sm text-gray-700 disabled:opacity-50"
+                className={cn("py-2", STORE_BTN_OUTLINE)}
               >
                 {busy === "delete" ? "Excluindo..." : "Excluir da minha lista"}
               </button>

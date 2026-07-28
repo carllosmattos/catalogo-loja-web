@@ -12,7 +12,11 @@ import {
   isShippingCoupon,
 } from "@/lib/uber-freight";
 import type { ShippingMethod, StoreSettings } from "@/types";
-import { STORE_MAIN } from "@/lib/store-layout";
+import {
+  STORE_MAIN,
+  STORE_BTN_PRIMARY,
+  STORE_ICON_BTN,
+} from "@/lib/store-layout";
 
 interface CartPageClientProps {
   settings: StoreSettings;
@@ -199,7 +203,7 @@ export function CartPageClient({ settings }: CartPageClientProps) {
             <p className="text-gray-500">Seu carrinho está vazio</p>
             <Link
               href="/catalogo"
-              className="mt-4 inline-block rounded-full bg-[var(--color-primary)] px-6 py-2 text-sm font-medium text-white"
+              className={cn("mt-4 inline-block px-6 py-2", STORE_BTN_PRIMARY)}
             >
               Ver catálogo
             </Link>
@@ -238,7 +242,7 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                             item.quantity - 1
                           )
                         }
-                        className="rounded-full p-1 hover:bg-gray-100"
+                        className={STORE_ICON_BTN}
                       >
                         <Minus className="h-4 w-4" />
                       </button>
@@ -252,14 +256,14 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                             item.quantity + 1
                           )
                         }
-                        className="rounded-full p-1 hover:bg-gray-100"
+                        className={STORE_ICON_BTN}
                       >
                         <Plus className="h-4 w-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => removeItem(item.product_id, item.size)}
-                        className="ml-auto rounded-full p-1 text-red-500 hover:bg-red-50"
+                        className={cn(STORE_ICON_BTN, "ml-auto text-red-500 hover:bg-red-50")}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -278,10 +282,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                     type="button"
                     onClick={() => selectMethod("delivery")}
                     className={cn(
-                      "w-full rounded-xl border bg-white p-3 text-left transition-colors",
+                      "w-full rounded-xl border bg-white p-3 text-left transition-all duration-200",
                       shippingMethod === "delivery"
-                        ? "border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]"
-                        : "border-transparent hover:border-gray-200"
+                        ? "border-[var(--color-primary)] shadow-sm ring-1 ring-[var(--color-primary)]"
+                        : "border-transparent hover:border-[var(--color-primary)]/25 hover:shadow-sm active:scale-[0.99]"
                     )}
                   >
                     <p className="font-medium text-gray-900">Entrega (transportadora)</p>
@@ -304,10 +308,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                     type="button"
                     onClick={() => selectMethod("uber")}
                     className={cn(
-                      "w-full rounded-xl border bg-white p-3 text-left transition-colors",
+                      "w-full rounded-xl border bg-white p-3 text-left transition-all duration-200",
                       shippingMethod === "uber"
-                        ? "border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]"
-                        : "border-transparent hover:border-gray-200"
+                        ? "border-[var(--color-primary)] shadow-sm ring-1 ring-[var(--color-primary)]"
+                        : "border-transparent hover:border-[var(--color-primary)]/25 hover:shadow-sm active:scale-[0.99]"
                     )}
                   >
                     <p className="font-medium text-gray-900">Uber</p>
@@ -357,7 +361,10 @@ export function CartPageClient({ settings }: CartPageClientProps) {
                     type="button"
                     onClick={applyCoupon}
                     disabled={couponLoading || !couponInput.trim()}
-                    className="shrink-0 rounded-full bg-[var(--color-primary)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    className={cn(
+                      "shrink-0 px-3 py-2 text-xs",
+                      STORE_BTN_PRIMARY
+                    )}
                   >
                     {couponLoading ? "..." : "Aplicar"}
                   </button>

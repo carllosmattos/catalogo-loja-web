@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ShoppingBag, User, Package, Home, Shirt } from "lucide-react";
 import { useCartStore, useCustomerStore } from "@/stores";
 import { cn } from "@/lib/utils";
-import { STORE_CONTAINER } from "@/lib/store-layout";
+import { STORE_CONTAINER, STORE_ICON_BTN } from "@/lib/store-layout";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 interface StoreHeaderProps {
@@ -56,10 +56,10 @@ export function StoreHeader({ storeName, logoUrl }: StoreHeaderProps) {
                 key={href}
                 href={href}
                 className={cn(
-                  "flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-all duration-200",
                   active
-                    ? "bg-[var(--color-accent)] text-[var(--color-primary)]"
-                    : "text-gray-500 hover:bg-gray-50 hover:text-[var(--color-primary)]"
+                    ? "bg-[var(--color-accent)] text-[var(--color-primary)] shadow-sm"
+                    : "text-gray-500 hover:bg-[var(--color-accent)]/70 hover:text-[var(--color-primary)] hover:shadow-sm active:scale-95"
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -76,7 +76,7 @@ export function StoreHeader({ storeName, logoUrl }: StoreHeaderProps) {
           />
           <Link
             href="/carrinho"
-            className="relative rounded-full p-2 text-[var(--color-primary)] hover:bg-[var(--color-accent)] md:p-2.5"
+            className={cn("relative md:p-2.5", STORE_ICON_BTN)}
           >
             <ShoppingBag className="h-5 w-5 md:h-6 md:w-6" />
             {totalItems > 0 && (
@@ -102,8 +102,10 @@ export function StoreHeader({ storeName, logoUrl }: StoreHeaderProps) {
               key={href}
               href={href}
               className={cn(
-                "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium",
-                active ? "text-[var(--color-primary)]" : "text-gray-500"
+                "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-all duration-200",
+                active
+                  ? "text-[var(--color-primary)]"
+                  : "text-gray-500 active:scale-95 hover:text-[var(--color-primary)]"
               )}
             >
               <Icon className="h-4 w-4" />

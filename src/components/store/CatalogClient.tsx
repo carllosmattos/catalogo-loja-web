@@ -7,7 +7,7 @@ import { ProductCard } from "@/components/store/ProductCard";
 import { StoreHeader } from "@/components/store/StoreHeader";
 import type { Category, Product, Promotion, StoreSettings } from "@/types";
 import { cn } from "@/lib/utils";
-import { STORE_MAIN, PRODUCT_GRID } from "@/lib/store-layout";
+import { STORE_MAIN, PRODUCT_GRID, STORE_BTN_OUTLINE } from "@/lib/store-layout";
 
 interface CatalogClientProps {
   settings: StoreSettings;
@@ -95,7 +95,7 @@ export function CatalogClient({
         <button
           type="button"
           onClick={() => setModalOpen(true)}
-          className="mb-4 flex w-full items-center justify-between rounded-2xl border border-[var(--color-primary)]/15 bg-white px-4 py-3 text-left shadow-sm"
+          className="mb-4 flex w-full items-center justify-between rounded-2xl border border-[var(--color-primary)]/15 bg-white px-4 py-3 text-left shadow-sm transition-all duration-200 hover:border-[var(--color-primary)]/40 hover:shadow-md hover:bg-[var(--color-accent)]/40 active:scale-[0.99]"
         >
           <div>
             <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
@@ -122,7 +122,7 @@ export function CatalogClient({
             type="button"
             onClick={loadMore}
             disabled={loading}
-            className="mt-6 w-full rounded-full border border-[var(--color-primary)] py-3 text-sm font-medium text-[var(--color-primary)] disabled:opacity-50"
+            className={cn("mt-6 w-full", STORE_BTN_OUTLINE)}
           >
             {loading ? "Carregando..." : "Carregar mais"}
           </button>

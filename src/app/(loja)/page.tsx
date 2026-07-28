@@ -56,7 +56,7 @@ export default async function HomePage() {
             </h2>
             <Link
               href="/catalogo"
-              className="flex items-center gap-1 text-sm text-[var(--color-primary)]"
+              className="flex items-center gap-1 rounded-full px-2 py-1 text-sm text-[var(--color-primary)] transition-all hover:bg-[var(--color-accent)] hover:gap-1.5 active:scale-95"
             >
               Ver tudo <ArrowRight className="h-4 w-4" />
             </Link>
@@ -93,7 +93,7 @@ export default async function HomePage() {
               )}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-2 rounded-full bg-[#25D366] px-6 py-2.5 text-sm font-semibold text-white"
+              className="mt-2 inline-flex items-center gap-2 rounded-full bg-[#25D366] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:brightness-110 hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
             >
               <img src="/icons/whatsapp.svg" alt="" className="h-5 w-5" />
               Falar no WhatsApp

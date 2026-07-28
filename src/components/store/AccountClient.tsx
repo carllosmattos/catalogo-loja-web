@@ -11,7 +11,8 @@ import {
 } from "@/lib/utils";
 import { BRAZILIAN_STATES } from "@/lib/address";
 import type { Customer, StoreSettings } from "@/types";
-import { STORE_MAIN } from "@/lib/store-layout";
+import { STORE_MAIN, STORE_BTN_PRIMARY } from "@/lib/store-layout";
+import { cn } from "@/lib/utils";
 
 interface AccountClientProps {
   settings: StoreSettings;
@@ -232,7 +233,7 @@ export function AccountClient({ settings }: AccountClientProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-full bg-[var(--color-primary)] py-3 text-sm font-semibold text-white disabled:opacity-50"
+                className={cn("w-full", STORE_BTN_PRIMARY)}
               >
                 {loading
                   ? "Aguarde..."
@@ -313,7 +314,7 @@ export function AccountClient({ settings }: AccountClientProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-full bg-[var(--color-primary)] py-3 text-sm font-semibold text-white disabled:opacity-50"
+                className={cn("w-full", STORE_BTN_PRIMARY)}
               >
                 {loading ? "Salvando..." : "Salvar dados"}
               </button>

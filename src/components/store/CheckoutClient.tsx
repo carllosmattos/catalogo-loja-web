@@ -11,7 +11,7 @@ import {
   isShippingCoupon,
 } from "@/lib/uber-freight";
 import type { ShippingMethod, StoreSettings } from "@/types";
-import { STORE_MAIN } from "@/lib/store-layout";
+import { STORE_MAIN, STORE_BTN_PRIMARY, STORE_ICON_BTN } from "@/lib/store-layout";
 import { Copy, Check } from "lucide-react";
 
 interface CheckoutClientProps {
@@ -220,7 +220,7 @@ export function CheckoutClient({
                         setCopied(true);
                         setTimeout(() => setCopied(false), 2000);
                       }}
-                      className="shrink-0 rounded-full p-2 hover:bg-gray-100"
+                      className={cn("shrink-0", STORE_ICON_BTN)}
                     >
                       {copied ? (
                         <Check className="h-4 w-4 text-green-600" />
@@ -234,7 +234,7 @@ export function CheckoutClient({
             )}
             <Link
               href={`/pedidos/${pixResult.tracking_token}`}
-              className="mt-6 inline-block rounded-full bg-[var(--color-primary)] px-6 py-3 text-sm font-semibold text-white"
+              className={cn("mt-6 inline-block", STORE_BTN_PRIMARY)}
             >
               Acompanhar pedido
             </Link>
@@ -347,7 +347,7 @@ export function CheckoutClient({
                   !items.length ||
                   (shippingMethod === "delivery" && Boolean(shipping?.blocked))
                 }
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary)] py-3.5 text-sm font-semibold text-white disabled:opacity-50"
+                className={cn("w-full", STORE_BTN_PRIMARY)}
               >
                 <img src="/icons/pix.svg" alt="" className="h-5 w-5 invert" />
                 {loading ? "Gerando PIX..." : "Pagar com PIX"}
