@@ -18,6 +18,18 @@ function extractGift(link: GiftLink): Record<string, unknown> | null {
   return null;
 }
 
+/** Custo unitário do brinde: preço/un + (frete do lote ÷ qtd do lote). */
+export function giftUnitCost(gift: {
+  purchase_price?: number | null;
+  purchase_freight?: number | null;
+  purchase_lot_qty?: number | null;
+}): number {
+  const price = Number(gift.purchase_price) || 0;
+  const freight = Number(gift.purchase_freight) || 0;
+  const lot = Math.max(1, Number(gift.purchase_lot_qty) || 1);
+  return Math.round((price + freight / lot) * 100) / 100;
+}
+
 export function applyPromotion(
   salePrice: number,
   productId: string,
@@ -98,8 +110,7 @@ export function calculateProfit(
     const gift = extractGift(lg);
     if (!gift) continue;
     const qty = Number(lg.quantity_per_sale) || 1;
-    const giftCost =
-      (Number(gift.purchase_price) + Number(gift.purchase_freight)) * qty;
+    const giftCost = giftUnitCost(gift) * qty;
     const markup = Number(gift.sale_markup) * qty;
     custoBrindes += giftCost;
     repasseBrinde += markup;

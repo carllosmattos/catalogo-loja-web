@@ -65,7 +65,10 @@ export interface Gift {
   name: string;
   stock: number;
   purchase_price: number;
+  /** Frete total do lote na compra (rateado por purchase_lot_qty). */
   purchase_freight: number;
+  /** Qtd. de unidades do lote para ratear o frete (mín. 1). */
+  purchase_lot_qty?: number;
   sale_markup: number;
   image_url: string | null;
   image_urls: string[];

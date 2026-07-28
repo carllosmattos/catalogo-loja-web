@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   AdminCard,
@@ -10,6 +10,7 @@ import {
 } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { giftPreviewImage } from "@/lib/deals";
+import { giftUnitCost } from "@/lib/profit";
 import { formatCurrency } from "@/lib/utils";
 import type { Gift } from "@/types";
 
@@ -18,6 +19,7 @@ const emptyForm = {
   stock: 0,
   purchase_price: 0,
   purchase_freight: 0,
+  purchase_lot_qty: 1,
   sale_markup: 0,
   image_url: "",
 };
@@ -28,6 +30,16 @@ export default function AdminBrindesPage() {
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState("");
   const supabase = createClient();
+
+  const unitCostPreview = useMemo(
+    () =>
+      giftUnitCost({
+        purchase_price: form.purchase_price,
+        purchase_freight: form.purchase_freight,
+        purchase_lot_qty: form.purchase_lot_qty,
+      }),
+    [form.purchase_price, form.purchase_freight, form.purchase_lot_qty]
+  );
 
   async function load() {
     const { data } = await supabase.from("gifts").select("*").order("name");
@@ -51,6 +63,7 @@ export default function AdminBrindesPage() {
       stock: Number(g.stock) || 0,
       purchase_price: Number(g.purchase_price) || 0,
       purchase_freight: Number(g.purchase_freight) || 0,
+      purchase_lot_qty: Math.max(1, Number(g.purchase_lot_qty) || 1),
       sale_markup: Number(g.sale_markup) || 0,
       image_url: giftPreviewImage(g) || g.image_url || "",
     });
@@ -64,6 +77,7 @@ export default function AdminBrindesPage() {
       stock: Math.max(0, Number(form.stock) || 0),
       purchase_price: Number(form.purchase_price) || 0,
       purchase_freight: Number(form.purchase_freight) || 0,
+      purchase_lot_qty: Math.max(1, Number(form.purchase_lot_qty) || 1),
       sale_markup: Number(form.sale_markup) || 0,
       image_url: form.image_url || null,
       image_urls: form.image_url ? [form.image_url] : [],
@@ -77,17 +91,22 @@ export default function AdminBrindesPage() {
         .update(payload)
         .eq("id", editing);
       if (error) {
-        setMessage(error.message);
+        setMessage(
+          error.message.includes("purchase_lot_qty")
+            ? "Rode a migration 041 no Supabase para salvar o lote do frete."
+            : error.message
+        );
         return;
       }
       setMessage("Brinde atualizado.");
     } else {
-      const { error } = await supabase.from("gifts").insert({
-        ...payload,
-        active: true,
-      });
+      const { error } = await supabase.from("gifts").insert(payload);
       if (error) {
-        setMessage(error.message);
+        setMessage(
+          error.message.includes("purchase_lot_qty")
+            ? "Rode a migration 041 no Supabase para cadastrar o lote do frete."
+            : error.message
+        );
         return;
       }
       setMessage("Brinde criado.");
@@ -96,12 +115,11 @@ export default function AdminBrindesPage() {
     load();
   }
 
-  async function toggleActive(g: Gift) {
+  async function setActive(id: string, active: boolean) {
     await supabase
       .from("gifts")
-      .update({ active: !g.active, updated_at: new Date().toISOString() })
-      .eq("id", g.id);
-    if (editing === g.id) resetForm();
+      .update({ active, updated_at: new Date().toISOString() })
+      .eq("id", id);
     load();
   }
 
@@ -111,7 +129,9 @@ export default function AdminBrindesPage() {
         Brindes
       </h1>
       {message && (
-        <p className="mb-4 text-sm text-green-700">{message}</p>
+        <p className="mb-4 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-sm text-gray-700">
+          {message}
+        </p>
       )}
       <div className="grid gap-6 lg:grid-cols-2">
         <AdminCard title={editing ? "Editar brinde" : "Novo brinde"}>
@@ -123,7 +143,7 @@ export default function AdminBrindesPage() {
               required
             />
             <AdminInput
-              label="Estoque"
+              label="Estoque atual"
               type="number"
               min={0}
               value={form.stock}
@@ -132,23 +152,45 @@ export default function AdminBrindesPage() {
               }
             />
             <AdminInput
-              label="Preço de compra"
+              label="Preço de compra (por unidade)"
               type="number"
               step="0.01"
+              min={0}
               value={form.purchase_price}
               onChange={(e) =>
                 setForm({ ...form, purchase_price: Number(e.target.value) })
               }
             />
             <AdminInput
-              label="Frete na compra"
+              label="Frete na compra (total do lote)"
               type="number"
               step="0.01"
+              min={0}
               value={form.purchase_freight}
               onChange={(e) =>
                 setForm({ ...form, purchase_freight: Number(e.target.value) })
               }
             />
+            <AdminInput
+              label="Qtd. do lote (para ratear o frete)"
+              type="number"
+              min={1}
+              step={1}
+              value={form.purchase_lot_qty}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  purchase_lot_qty: Math.max(1, Number(e.target.value) || 1),
+                })
+              }
+            />
+            <p className="rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              Custo unitário no lucro:{" "}
+              <strong>{formatCurrency(unitCostPreview)}</strong>
+              {" = "}
+              preço/un + (frete ÷ qtd. do lote). Ex.: 100 un., frete R$ 30 →
+              frete/un R$ 0,30.
+            </p>
             <AdminInput
               label="Markup na venda"
               type="number"
@@ -185,8 +227,8 @@ export default function AdminBrindesPage() {
           <ul className="max-h-[640px] space-y-2 overflow-y-auto">
             {gifts.map((g) => {
               const img = giftPreviewImage(g);
-              const custo =
-                Number(g.purchase_price || 0) + Number(g.purchase_freight || 0);
+              const unit = giftUnitCost(g);
+              const lot = Math.max(1, Number(g.purchase_lot_qty) || 1);
               return (
                 <li
                   key={g.id}
@@ -207,7 +249,10 @@ export default function AdminBrindesPage() {
                     <div className="min-w-0">
                       <p className="font-medium">{g.name}</p>
                       <p className="text-gray-400">
-                        Estoque {g.stock} · Custo {formatCurrency(custo)}
+                        Estoque {g.stock} · Custo/un {formatCurrency(unit)}
+                        {Number(g.purchase_freight) > 0
+                          ? ` (lote ${lot})`
+                          : ""}
                         {Number(g.sale_markup) > 0
                           ? ` · Markup ${formatCurrency(Number(g.sale_markup))}`
                           : ""}{" "}
@@ -217,18 +262,16 @@ export default function AdminBrindesPage() {
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <AdminButton
-                      type="button"
                       variant="secondary"
                       onClick={() => editGift(g)}
                     >
                       Editar
                     </AdminButton>
                     <AdminButton
-                      type="button"
                       variant="secondary"
-                      onClick={() => toggleActive(g)}
+                      onClick={() => setActive(g.id, !g.active)}
                     >
-                      {g.active ? "Arquivar" : "Ativar"}
+                      {g.active ? "Arquivar" : "Reativar"}
                     </AdminButton>
                   </div>
                 </li>
