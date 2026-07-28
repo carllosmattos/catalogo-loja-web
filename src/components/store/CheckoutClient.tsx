@@ -190,27 +190,45 @@ export function CheckoutClient({
               </p>
             )}
             {pixCode && (
-              <div className="mt-4">
-                <p className="mb-2 text-xs text-gray-500">Copia e cola:</p>
-                <div className="flex items-center gap-2 rounded-lg bg-white p-3">
-                  <code className="flex-1 break-all text-left text-xs">
-                    {pixCode.slice(0, 80)}...
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(pixCode);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    className="shrink-0 rounded-full p-2 hover:bg-gray-100"
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                  </button>
+              <div className="mt-4 space-y-4">
+                {(pixResult.pix_qr_base64 || pixCode) && (
+                  <div>
+                    <p className="mb-2 text-xs text-gray-500">
+                      Escaneie o QR Code
+                    </p>
+                    <img
+                      src={
+                        pixResult.pix_qr_base64
+                          ? String(pixResult.pix_qr_base64)
+                          : `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(pixCode)}`
+                      }
+                      alt="QR Code PIX"
+                      className="mx-auto h-52 w-52 rounded-xl bg-white p-2 shadow-sm"
+                    />
+                  </div>
+                )}
+                <div>
+                  <p className="mb-2 text-xs text-gray-500">Copia e cola:</p>
+                  <div className="flex items-center gap-2 rounded-lg bg-white p-3">
+                    <code className="flex-1 break-all text-left text-xs">
+                      {pixCode.slice(0, 80)}...
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(pixCode);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      className="shrink-0 rounded-full p-2 hover:bg-gray-100"
+                    >
+                      {copied ? (
+                        <Check className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

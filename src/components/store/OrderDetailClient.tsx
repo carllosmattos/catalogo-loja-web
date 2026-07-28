@@ -293,7 +293,13 @@ export function OrderDetailClient({
 
           {showActivePix && pixCode && (
             <div className="mt-4 rounded-2xl bg-[var(--color-accent)] p-4">
-              <p className="text-sm font-medium">PIX Copia e Cola</p>
+              <p className="mb-3 text-sm font-medium">Pague com PIX</p>
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixCode)}`}
+                alt="QR Code PIX"
+                className="mx-auto mb-3 h-48 w-48 rounded-xl bg-white p-2"
+              />
+              <p className="text-sm font-medium">Copia e cola</p>
               <div className="mt-2 flex gap-2">
                 <code className="flex-1 break-all text-xs">
                   {pixCode.slice(0, 60)}...

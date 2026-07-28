@@ -10,6 +10,7 @@ import {
 import {
   appBaseUrl,
   createPixCheckout,
+  extractPixQrBase64,
   paymentsEnabled,
   webhookNotificationUrl,
 } from "@/lib/payments";
@@ -280,6 +281,7 @@ export async function startPixCheckout(
     tracking_token: trackingToken,
     payment_id: paymentId,
     pix_copy_paste: result.pixCopyPaste,
+    pix_qr_base64: result.qrCodeBase64 || extractPixQrBase64(result.raw),
     ticket_url: result.ticketUrl,
     provider_payment_id: result.providerPaymentId,
     total,
