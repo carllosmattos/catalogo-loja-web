@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bell, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -33,6 +34,7 @@ export function NotificationBell({
   const router = useRouter();
   const supabase = createClient();
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -42,6 +44,10 @@ export function NotificationBell({
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const disabled = mode === "customer" && !customerId;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const refreshUnread = useCallback(async () => {
     if (disabled) {
@@ -192,6 +198,105 @@ export function NotificationBell({
     }
   }
 
+  const modal =
+    open && mounted
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notificações"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50"
+              aria-label="Fechar"
+              onClick={() => setOpen(false)}
+            />
+            <div
+              ref={dialogRef}
+              className="relative z-10 flex max-h-[min(85dvh,32rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            >
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
+                <p className="text-base font-semibold text-gray-900">
+                  Notificações
+                </p>
+                <div className="flex items-center gap-2">
+                  {unread > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void markAllRead()}
+                      className="text-xs text-[var(--color-primary)] hover:underline"
+                    >
+                      Marcar todas
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100"
+                    aria-label="Fechar"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div
+                ref={listRef}
+                onScroll={onScroll}
+                className="min-h-0 flex-1 overflow-y-auto"
+              >
+                {loading ? (
+                  <p className="p-6 text-center text-sm text-gray-400">
+                    Carregando…
+                  </p>
+                ) : items.length === 0 ? (
+                  <p className="p-6 text-center text-sm text-gray-400">
+                    Nenhuma notificação.
+                  </p>
+                ) : (
+                  <ul>
+                    {items.map((n) => (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          onClick={() => void onItemClick(n)}
+                          className={cn(
+                            "w-full border-b border-gray-50 px-4 py-3 text-left hover:bg-gray-50",
+                            !n.read_at && "bg-[var(--color-accent)]/40"
+                          )}
+                        >
+                          <p className="text-sm font-medium text-gray-900">
+                            {!n.read_at && (
+                              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" />
+                            )}
+                            {n.title}
+                          </p>
+                          {n.body && (
+                            <p className="mt-0.5 line-clamp-3 whitespace-pre-line text-xs text-gray-500">
+                              {n.body}
+                            </p>
+                          )}
+                          <p className="mt-1 text-[10px] text-gray-400">
+                            {new Date(n.created_at).toLocaleString("pt-BR")}
+                          </p>
+                        </button>
+                      </li>
+                    ))}
+                    {loadingMore && (
+                      <li className="p-3 text-center text-xs text-gray-400">
+                        Carregando mais…
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <>
       <button
@@ -217,101 +322,7 @@ export function NotificationBell({
           </span>
         )}
       </button>
-
-      {open && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Notificações"
-        >
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/45"
-            aria-label="Fechar"
-            onClick={() => setOpen(false)}
-          />
-          <div
-            ref={dialogRef}
-            className="relative z-10 flex max-h-[min(85dvh,32rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
-          >
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
-              <p className="text-base font-semibold text-gray-900">
-                Notificações
-              </p>
-              <div className="flex items-center gap-2">
-                {unread > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void markAllRead()}
-                    className="text-xs text-[var(--color-primary)] hover:underline"
-                  >
-                    Marcar todas
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100"
-                  aria-label="Fechar"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div
-              ref={listRef}
-              onScroll={onScroll}
-              className="min-h-0 flex-1 overflow-y-auto"
-            >
-              {loading ? (
-                <p className="p-6 text-center text-sm text-gray-400">
-                  Carregando…
-                </p>
-              ) : items.length === 0 ? (
-                <p className="p-6 text-center text-sm text-gray-400">
-                  Nenhuma notificação.
-                </p>
-              ) : (
-                <ul>
-                  {items.map((n) => (
-                    <li key={n.id}>
-                      <button
-                        type="button"
-                        onClick={() => void onItemClick(n)}
-                        className={cn(
-                          "w-full border-b border-gray-50 px-4 py-3 text-left hover:bg-gray-50",
-                          !n.read_at && "bg-[var(--color-accent)]/40"
-                        )}
-                      >
-                        <p className="text-sm font-medium text-gray-900">
-                          {!n.read_at && (
-                            <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" />
-                          )}
-                          {n.title}
-                        </p>
-                        {n.body && (
-                          <p className="mt-0.5 line-clamp-3 whitespace-pre-line text-xs text-gray-500">
-                            {n.body}
-                          </p>
-                        )}
-                        <p className="mt-1 text-[10px] text-gray-400">
-                          {new Date(n.created_at).toLocaleString("pt-BR")}
-                        </p>
-                      </button>
-                    </li>
-                  ))}
-                  {loadingMore && (
-                    <li className="p-3 text-center text-xs text-gray-400">
-                      Carregando mais…
-                    </li>
-                  )}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {modal}
     </>
   );
 }
