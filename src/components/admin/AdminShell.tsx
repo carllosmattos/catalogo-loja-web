@@ -19,6 +19,7 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
@@ -90,6 +91,7 @@ const NAV: NavItem[] = [
     ],
   },
   { href: "/admin/pagamentos", label: "Pagamentos", icon: CreditCard },
+  { href: "/admin/reembolsos", label: "Reembolsos", icon: RotateCcw },
   {
     href: "/admin/frete",
     label: "Frete",

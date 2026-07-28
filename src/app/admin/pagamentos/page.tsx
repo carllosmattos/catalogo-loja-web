@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminButton } from "@/components/admin/AdminUI";
@@ -43,16 +44,6 @@ const ORDER_STATUS_OPTIONS = [
   { value: "refunded", label: "Reembolsado" },
 ];
 
-type RefundRow = {
-  id: string;
-  order_id: string;
-  status: string;
-  reason?: string | null;
-  created_at?: string;
-  orders?: Record<string, unknown> | Record<string, unknown>[] | null;
-  payments?: Record<string, unknown> | Record<string, unknown>[] | null;
-};
-
 export default function AdminPagamentosPage() {
   const searchParams = useSearchParams();
   const highlightOrder = searchParams.get("order");
@@ -65,24 +56,11 @@ export default function AdminPagamentosPage() {
   const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [reissuingId, setReissuingId] = useState<string | null>(null);
-  const [refundBusyId, setRefundBusyId] = useState<string | null>(null);
-  const [refundNotes, setRefundNotes] = useState<Record<string, string>>({});
-  const [pendingRefunds, setPendingRefunds] = useState<RefundRow[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(
     highlightOrder || null
   );
   const [message, setMessage] = useState("");
   const supabase = createClient();
-
-  async function loadRefunds() {
-    const { data } = await supabase
-      .from("refund_requests")
-      .select("*, orders(*), payments(*)")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(30);
-    setPendingRefunds((data as RefundRow[]) || []);
-  }
 
   async function load(
     nextPage = page,
@@ -127,7 +105,6 @@ export default function AdminPagamentosPage() {
     setOrders((data as OrderRow[]) || []);
     setTotal(count ?? 0);
     setLoading(false);
-    await loadRefunds();
   }
 
   useEffect(() => {
@@ -141,36 +118,6 @@ export default function AdminPagamentosPage() {
       setStatus("all");
     }
   }, [highlightOrder]);
-
-  async function decideRefund(refundId: string, action: "approve" | "reject") {
-    setRefundBusyId(refundId);
-    setMessage("");
-    try {
-      const res = await fetch(`/api/admin/refunds/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refundId,
-          adminNotes: refundNotes[refundId] || "",
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMessage(String(data.error || "Falha ao processar reembolso"));
-      } else {
-        setMessage(
-          action === "approve"
-            ? "Reembolso aprovado — estorno no MP e estoque devolvido."
-            : "Reembolso rejeitado — pedido voltou a Pago."
-        );
-      }
-      await load();
-    } catch {
-      setMessage("Erro de rede ao processar reembolso.");
-    } finally {
-      setRefundBusyId(null);
-    }
-  }
 
   async function syncOrder(order: OrderRow) {
     const payments = order.payments;
@@ -252,88 +199,16 @@ export default function AdminPagamentosPage() {
         <strong>Atualizar status</strong> consulta o Mercado Pago quando o
         webhook atrasou.{" "}
         <strong>Gerar novo PIX</strong> cria um pedido novo se o anterior
-        expirou ou foi cancelado.
+        expirou ou foi cancelado. Reembolsos ficam em{" "}
+        <Link href="/admin/reembolsos" className="underline">
+          Admin → Reembolsos
+        </Link>
+        .
       </p>
       {message && (
         <p className="mb-4 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-sm text-gray-700">
           {message}
         </p>
-      )}
-
-      {pendingRefunds.length > 0 && (
-        <AdminCard title={`Reembolsos pendentes (${pendingRefunds.length})`}>
-          <ul className="space-y-3">
-            {pendingRefunds.map((r) => {
-              const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
-              const name = String(order?.customer_name || "Cliente");
-              const totalAmt = Number(order?.total_amount) || 0;
-              const created = r.created_at
-                ? new Date(r.created_at).toLocaleString("pt-BR")
-                : "";
-              return (
-                <li
-                  key={r.id}
-                  className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 text-sm"
-                >
-                  <p className="font-medium">
-                    {name} · {formatCurrency(totalAmt)} · #
-                    {String(r.order_id).slice(0, 8)}
-                  </p>
-                  {created && (
-                    <p className="text-xs text-gray-400">{created}</p>
-                  )}
-                  <p className="mt-1 text-xs text-gray-600">
-                    Motivo: {r.reason?.trim() || "—"}
-                  </p>
-                  <label className="mt-2 block text-xs text-gray-500">
-                    Observações (opcional)
-                    <input
-                      type="text"
-                      value={refundNotes[r.id] || ""}
-                      onChange={(e) =>
-                        setRefundNotes((n) => ({
-                          ...n,
-                          [r.id]: e.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
-                    />
-                  </label>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <AdminButton
-                      type="button"
-                      disabled={refundBusyId === r.id}
-                      onClick={() => decideRefund(r.id, "approve")}
-                    >
-                      {refundBusyId === r.id
-                        ? "Processando…"
-                        : "Aprovar e estornar"}
-                    </AdminButton>
-                    <AdminButton
-                      type="button"
-                      variant="secondary"
-                      disabled={refundBusyId === r.id}
-                      onClick={() => decideRefund(r.id, "reject")}
-                    >
-                      Rejeitar
-                    </AdminButton>
-                    <AdminButton
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setExpandedId(r.order_id);
-                        setStatus("refund_requested");
-                        setPage(1);
-                      }}
-                    >
-                      Ver pedido
-                    </AdminButton>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </AdminCard>
       )}
 
       <AdminCard title={`Pedidos online (${total})`}>
