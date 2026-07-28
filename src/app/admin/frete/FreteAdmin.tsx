@@ -64,6 +64,7 @@ export default function FreteAdmin({
   const [meStatusLoaded, setMeStatusLoaded] = useState(false);
   const [meMsg, setMeMsg] = useState("");
   const [meError, setMeError] = useState("");
+  const [senderMsg, setSenderMsg] = useState("");
   const [form, setForm] = useState<ShippingZone>({
     zone_type: "paid",
     scope: "state",
@@ -166,6 +167,9 @@ export default function FreteAdmin({
       .update({
         sender_zip: settings.sender_zip,
         sender_street: settings.sender_street,
+        sender_number: settings.sender_number,
+        sender_complement: settings.sender_complement,
+        sender_neighborhood: settings.sender_neighborhood,
         sender_city: settings.sender_city,
         sender_state: settings.sender_state,
         default_package_weight_kg: settings.default_package_weight_kg,
@@ -175,6 +179,7 @@ export default function FreteAdmin({
         ),
       })
       .eq("id", settings.id);
+    setSenderMsg("Endereço da loja salvo.");
     load();
   }
 
@@ -302,20 +307,51 @@ export default function FreteAdmin({
       )}
 
       {section === "remetente" && (
-        <AdminCard title="Endereço remetente">
+        <AdminCard title="Endereço da loja (remetente)">
+          <p className="mb-3 text-sm text-gray-500">
+            Usado no frete (Melhor Envio) e como endereço de devolução em{" "}
+            <strong>Trocas e devoluções</strong> para o cliente.
+          </p>
+          {senderMsg && (
+            <p className="mb-3 text-sm text-green-700">{senderMsg}</p>
+          )}
           <form onSubmit={saveSender} className="grid gap-3 md:grid-cols-2">
             <AdminInput
-              label="CEP remetente"
+              label="CEP"
               value={String(settings.sender_zip || "")}
               onChange={(e) =>
                 setSettings({ ...settings, sender_zip: e.target.value })
               }
             />
             <AdminInput
-              label="Rua"
+              label="Rua / logradouro"
               value={String(settings.sender_street || "")}
               onChange={(e) =>
                 setSettings({ ...settings, sender_street: e.target.value })
+              }
+            />
+            <AdminInput
+              label="Número"
+              value={String(settings.sender_number || "")}
+              onChange={(e) =>
+                setSettings({ ...settings, sender_number: e.target.value })
+              }
+            />
+            <AdminInput
+              label="Complemento"
+              value={String(settings.sender_complement || "")}
+              onChange={(e) =>
+                setSettings({ ...settings, sender_complement: e.target.value })
+              }
+            />
+            <AdminInput
+              label="Bairro"
+              value={String(settings.sender_neighborhood || "")}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  sender_neighborhood: e.target.value,
+                })
               }
             />
             <AdminInput

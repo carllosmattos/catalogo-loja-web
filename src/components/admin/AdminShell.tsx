@@ -98,7 +98,7 @@ const NAV: NavItem[] = [
     icon: Truck,
     children: [
       { href: "/admin/frete", label: "Melhor Envio" },
-      { href: "/admin/frete/remetente", label: "Remetente" },
+      { href: "/admin/frete/remetente", label: "Endereço da loja" },
       { href: "/admin/frete/regras", label: "Regras" },
     ],
   },
