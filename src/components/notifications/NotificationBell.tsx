@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -38,8 +38,8 @@ export function NotificationBell({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const disabled = mode === "customer" && !customerId;
 
@@ -120,11 +120,16 @@ export function NotificationBell({
 
   useEffect(() => {
     if (!open) return;
-    function onDoc(e: MouseEvent) {
-      if (!panelRef.current?.contains(e.target as Node)) setOpen(false);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
     }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
   async function markRead(n: AppNotification) {
@@ -144,7 +149,9 @@ export function NotificationBell({
     }
     setItems((prev) =>
       prev.map((x) =>
-        x.id === n.id ? { ...x, read_at: x.read_at || new Date().toISOString() } : x
+        x.id === n.id
+          ? { ...x, read_at: x.read_at || new Date().toISOString() }
+          : x
       )
     );
     setUnread((u) => Math.max(0, u - (n.read_at ? 0 : 1)));
@@ -186,22 +193,21 @@ export function NotificationBell({
   }
 
   return (
-    <div className={cn("relative", className)} ref={panelRef}>
+    <>
       <button
         type="button"
         onClick={() => {
           if (disabled) return;
-          setOpen((o) => !o);
+          setOpen(true);
         }}
         className={cn(
           "relative rounded-full p-2 text-[var(--color-primary)] hover:bg-[var(--color-accent)]",
-          disabled && "cursor-not-allowed opacity-40"
+          disabled && "cursor-not-allowed opacity-40",
+          className
         )}
         aria-label="Notificações"
         title={
-          disabled
-            ? "Entre na conta para ver notificações"
-            : "Notificações"
+          disabled ? "Entre na conta para ver notificações" : "Notificações"
         }
       >
         <Bell className="h-5 w-5" />
@@ -213,71 +219,99 @@ export function NotificationBell({
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[min(100vw-2rem,22rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <p className="text-sm font-semibold text-gray-800">Notificações</p>
-            {unread > 0 && (
-              <button
-                type="button"
-                onClick={() => void markAllRead()}
-                className="text-xs text-[var(--color-primary)] hover:underline"
-              >
-                Marcar todas
-              </button>
-            )}
-          </div>
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Notificações"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/45"
+            aria-label="Fechar"
+            onClick={() => setOpen(false)}
+          />
           <div
-            ref={listRef}
-            onScroll={onScroll}
-            className="max-h-80 overflow-y-auto"
+            ref={dialogRef}
+            className="relative z-10 flex max-h-[min(85dvh,32rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
           >
-            {loading ? (
-              <p className="p-4 text-center text-sm text-gray-400">
-                Carregando…
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
+              <p className="text-base font-semibold text-gray-900">
+                Notificações
               </p>
-            ) : items.length === 0 ? (
-              <p className="p-4 text-center text-sm text-gray-400">
-                Nenhuma notificação.
-              </p>
-            ) : (
-              <ul>
-                {items.map((n) => (
-                  <li key={n.id}>
-                    <button
-                      type="button"
-                      onClick={() => void onItemClick(n)}
-                      className={cn(
-                        "w-full border-b border-gray-50 px-3 py-2.5 text-left hover:bg-gray-50",
-                        !n.read_at && "bg-[var(--color-accent)]/40"
-                      )}
-                    >
-                      <p className="text-sm font-medium text-gray-900">
-                        {!n.read_at && (
-                          <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" />
-                        )}
-                        {n.title}
-                      </p>
-                      {n.body && (
-                        <p className="mt-0.5 line-clamp-2 whitespace-pre-line text-xs text-gray-500">
-                          {n.body}
-                        </p>
-                      )}
-                      <p className="mt-1 text-[10px] text-gray-400">
-                        {new Date(n.created_at).toLocaleString("pt-BR")}
-                      </p>
-                    </button>
-                  </li>
-                ))}
-                {loadingMore && (
-                  <li className="p-2 text-center text-xs text-gray-400">
-                    Carregando mais…
-                  </li>
+              <div className="flex items-center gap-2">
+                {unread > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void markAllRead()}
+                    className="text-xs text-[var(--color-primary)] hover:underline"
+                  >
+                    Marcar todas
+                  </button>
                 )}
-              </ul>
-            )}
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100"
+                  aria-label="Fechar"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div
+              ref={listRef}
+              onScroll={onScroll}
+              className="min-h-0 flex-1 overflow-y-auto"
+            >
+              {loading ? (
+                <p className="p-6 text-center text-sm text-gray-400">
+                  Carregando…
+                </p>
+              ) : items.length === 0 ? (
+                <p className="p-6 text-center text-sm text-gray-400">
+                  Nenhuma notificação.
+                </p>
+              ) : (
+                <ul>
+                  {items.map((n) => (
+                    <li key={n.id}>
+                      <button
+                        type="button"
+                        onClick={() => void onItemClick(n)}
+                        className={cn(
+                          "w-full border-b border-gray-50 px-4 py-3 text-left hover:bg-gray-50",
+                          !n.read_at && "bg-[var(--color-accent)]/40"
+                        )}
+                      >
+                        <p className="text-sm font-medium text-gray-900">
+                          {!n.read_at && (
+                            <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-primary)]" />
+                          )}
+                          {n.title}
+                        </p>
+                        {n.body && (
+                          <p className="mt-0.5 line-clamp-3 whitespace-pre-line text-xs text-gray-500">
+                            {n.body}
+                          </p>
+                        )}
+                        <p className="mt-1 text-[10px] text-gray-400">
+                          {new Date(n.created_at).toLocaleString("pt-BR")}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                  {loadingMore && (
+                    <li className="p-3 text-center text-xs text-gray-400">
+                      Carregando mais…
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
