@@ -100,6 +100,12 @@ export default async function HomePage() {
             </a>
           </section>
         )}
+
+        <p className="mt-8 pb-2 text-center text-xs text-gray-400">
+          <Link href="/trocas-e-devolucoes" className="underline">
+            Trocas e devoluções
+          </Link>
+        </p>
       </main>
     </>
   );

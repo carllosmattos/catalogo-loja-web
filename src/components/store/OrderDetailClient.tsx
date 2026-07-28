@@ -8,6 +8,10 @@ import { useCustomerStore } from "@/stores";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import { orderStatusLabel } from "@/lib/order-status";
+import {
+  REFUND_REASON_OPTIONS,
+  type RefundReasonCode,
+} from "@/lib/refunds";
 import { Copy, Check, RefreshCw } from "lucide-react";
 import type { StoreSettings } from "@/types";
 import { STORE_MAIN } from "@/lib/store-layout";
@@ -68,6 +72,10 @@ export function OrderDetailClient({
     pix_copy_paste: string;
     total: number;
   } | null>(null);
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundCode, setRefundCode] = useState<RefundReasonCode>("cooling_off");
+  const [refundDetail, setRefundDetail] = useState("");
+  const [refundAck, setRefundAck] = useState(false);
 
   async function refresh() {
     const supabase = createClient();
@@ -192,6 +200,12 @@ export function OrderDetailClient({
 
   async function requestRefund() {
     if (!bundle?.order?.id || !customer?.id || busy) return;
+    if (!refundAck) {
+      setActionError(
+        "Confirme que leu as regras de trocas e devoluções antes de enviar."
+      );
+      return;
+    }
     setBusy("refund");
     setActionError(null);
     const res = await fetch("/api/orders/refund", {
@@ -200,7 +214,8 @@ export function OrderDetailClient({
       body: JSON.stringify({
         orderId: bundle.order.id,
         customerId: customer.id,
-        reason: "Solicitação do cliente",
+        reason: refundDetail.trim(),
+        reasonCode: refundCode,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -209,6 +224,9 @@ export function OrderDetailClient({
       setActionError(String(data.error || "Não foi possível solicitar reembolso."));
       return;
     }
+    setRefundOpen(false);
+    setRefundDetail("");
+    setRefundAck(false);
     await refresh();
   }
 
@@ -357,14 +375,119 @@ export function OrderDetailClient({
               </button>
             )}
             {status === "paid" && customer && (
-              <button
-                type="button"
-                onClick={requestRefund}
-                disabled={Boolean(busy)}
-                className="rounded-full border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
-              >
-                {busy === "refund" ? "Enviando..." : "Solicitar reembolso"}
-              </button>
+              <>
+                {!refundOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRefundOpen(true);
+                      setActionError(null);
+                    }}
+                    disabled={Boolean(busy)}
+                    className="rounded-full border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
+                  >
+                    Solicitar reembolso / devolução
+                  </button>
+                ) : (
+                  <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm">
+                    <p className="font-medium text-gray-800">
+                      Solicitar reembolso
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      O estorno só acontece depois que a loja{" "}
+                      <strong>receber e conferir</strong> a peça. Frete de
+                      devolução por sua conta (exceto defeito/erro da loja).{" "}
+                      <Link
+                        href="/trocas-e-devolucoes"
+                        className="underline text-[var(--color-primary)]"
+                      >
+                        Ver política completa
+                      </Link>
+                      .
+                    </p>
+                    <div>
+                      <label className="text-xs font-medium text-gray-500">
+                        Motivo
+                      </label>
+                      <select
+                        value={refundCode}
+                        onChange={(e) =>
+                          setRefundCode(e.target.value as RefundReasonCode)
+                        }
+                        className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                      >
+                        {REFUND_REASON_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        {
+                          REFUND_REASON_OPTIONS.find((o) => o.value === refundCode)
+                            ?.hint
+                        }
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-500">
+                        Detalhes (opcional)
+                      </label>
+                      <textarea
+                        value={refundDetail}
+                        onChange={(e) => setRefundDetail(e.target.value)}
+                        rows={2}
+                        className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                        placeholder="Ex.: tamanho ficou grande, veio manchado…"
+                      />
+                    </div>
+                    <label className="flex items-start gap-2 text-xs text-gray-700">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={refundAck}
+                        onChange={(e) => setRefundAck(e.target.checked)}
+                      />
+                      <span>
+                        Li as regras de trocas e devoluções e entendi que o
+                        reembolso depende do recebimento da peça pela loja.
+                      </span>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={requestRefund}
+                        disabled={Boolean(busy) || !refundAck}
+                        className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {busy === "refund" ? "Enviando…" : "Enviar solicitação"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRefundOpen(false)}
+                        disabled={Boolean(busy)}
+                        className="rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-600"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {(status === "awaiting_return" ||
+              status === "refund_requested") && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-medium">Aguardando devolução da peça</p>
+                <p className="mt-1 text-xs">
+                  Envie o produto de volta. O estorno só será feito após a loja
+                  receber e conferir.{" "}
+                  <Link href="/trocas-e-devolucoes" className="underline">
+                    Ver endereço e regras
+                  </Link>
+                  .
+                </p>
+              </div>
             )}
             {customer && (
               <button

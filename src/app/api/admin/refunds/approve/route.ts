@@ -4,10 +4,19 @@ import { refundPayment } from "@/lib/payments";
 
 export async function POST(request: Request) {
   try {
-    const { refundId, adminNotes } = await request.json();
+    const { refundId, adminNotes, productReceived } = await request.json();
     if (!refundId) {
       return NextResponse.json(
         { error: "refundId obrigatório" },
+        { status: 400 }
+      );
+    }
+    if (!productReceived) {
+      return NextResponse.json(
+        {
+          error:
+            "Marque que o produto foi recebido e conferido antes de aprovar.",
+        },
         { status: 400 }
       );
     }
@@ -79,6 +88,7 @@ export async function POST(request: Request) {
         status: "approved",
         admin_notes: String(adminNotes || "").trim(),
         provider_refund_id: providerRefundId || null,
+        product_received_at: new Date().toISOString(),
       })
       .eq("id", refundId);
 
@@ -89,6 +99,7 @@ export async function POST(request: Request) {
     const orderId = req.order_id;
     const { error: rpcErr } = await supabase.rpc("mark_order_refunded", {
       p_order_id: orderId,
+      p_product_received: true,
     });
     if (rpcErr) {
       return NextResponse.json(

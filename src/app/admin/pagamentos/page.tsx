@@ -39,7 +39,7 @@ const ORDER_STATUS_OPTIONS = [
   { value: "all", label: "Todos" },
   { value: "pending_payment", label: "Aguardando PIX" },
   { value: "paid", label: "Pago" },
-  { value: "refund_requested", label: "Reembolso solicitado" },
+  { value: "refund_requested", label: "Aguardando devolução" },
   { value: "cancelled", label: "Cancelado / expirado" },
   { value: "refunded", label: "Reembolsado" },
 ];
@@ -79,7 +79,7 @@ export default function AdminPagamentosPage() {
     } else if (nextStatus === "paid") {
       q = q.in("status", ["paid", "approved"]);
     } else if (nextStatus === "refund_requested") {
-      q = q.eq("status", "refund_requested");
+      q = q.in("status", ["refund_requested", "awaiting_return"]);
     } else if (nextStatus === "cancelled") {
       q = q.in("status", ["cancelled", "canceled", "expired"]);
     } else if (nextStatus === "refunded") {
