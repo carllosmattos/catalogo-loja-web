@@ -9,6 +9,13 @@ import {
   AdminButton,
   AdminFormActions,
 } from "@/components/admin/AdminUI";
+import {
+  ADMIN_PAGE_SIZE,
+  AdminListFilters,
+  AdminPagination,
+  dayEndIso,
+  dayStartIso,
+} from "@/components/admin/AdminPagination";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { SIZES, SIZE_LABELS, sizeDisplayLabel } from "@/lib/sizes";
 import { formatCurrency } from "@/lib/utils";
@@ -52,6 +59,12 @@ export default function ProdutosAdmin({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
+  const [listTotal, setListTotal] = useState(0);
+  const [listPage, setListPage] = useState(1);
+  const [listDateFrom, setListDateFrom] = useState("");
+  const [listDateTo, setListDateTo] = useState("");
+  const [listStatus, setListStatus] = useState("active");
+  const [listLoading, setListLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [gifts, setGifts] = useState<Gift[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -80,13 +93,8 @@ export default function ProdutosAdmin({
 
   const supabase = createClient();
 
-  async function load() {
-    const [{ data: prods }, { data: cats }, { data: giftRows }] = await Promise.all([
-      supabase.from("products").select("*").order("created_at", { ascending: false }),
-      supabase.from("categories").select("*").order("sort_order"),
-      supabase.from("gifts").select("*").eq("active", true).order("name"),
-    ]);
-    const ids = (prods || []).map((p) => p.id);
+  async function attachSizes(prods: Product[]): Promise<Product[]> {
+    const ids = prods.map((p) => p.id);
     const { data: sizeRows } = ids.length
       ? await supabase
           .from("product_sizes")
@@ -98,17 +106,77 @@ export default function ProdutosAdmin({
       if (!sizeMap[row.product_id]) sizeMap[row.product_id] = {};
       sizeMap[row.product_id][row.size] = row.stock;
     }
-    setProducts(
-      (prods || []).map((p) => ({
-        ...p,
-        sizes: SIZES.map((s) => ({
-          size: s,
-          stock: sizeMap[p.id]?.[s] ?? 0,
-        })),
-      }))
-    );
+    return prods.map((p) => ({
+      ...p,
+      sizes: SIZES.map((s) => ({
+        size: s,
+        stock: sizeMap[p.id]?.[s] ?? 0,
+      })),
+    }));
+  }
+
+  async function loadMeta() {
+    const [{ data: cats }, { data: giftRows }] = await Promise.all([
+      supabase.from("categories").select("*").order("sort_order"),
+      supabase.from("gifts").select("*").eq("active", true).order("name"),
+    ]);
     setCategories(cats || []);
     setGifts((giftRows as Gift[]) || []);
+  }
+
+  /** Cadastro: carrega produtos necessários (todos ou o da edição). */
+  async function loadCadastroProducts() {
+    const editId = searchParams.get("edit");
+    let q = supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (editId) q = q.eq("id", editId);
+    else q = q.limit(200);
+    const { data: prods } = await q;
+    setProducts(await attachSizes((prods as Product[]) || []));
+  }
+
+  async function loadLista(
+    page = listPage,
+    status = listStatus,
+    fromDate = listDateFrom,
+    toDate = listDateTo
+  ) {
+    setListLoading(true);
+    let q = supabase
+      .from("products")
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false });
+
+    if (status === "active") q = q.eq("active", true);
+    else if (status === "inactive") q = q.eq("active", false);
+
+    const fromIso = dayStartIso(fromDate);
+    const toIso = dayEndIso(toDate);
+    if (fromIso) q = q.gte("created_at", fromIso);
+    if (toIso) q = q.lte("created_at", toIso);
+
+    const fromIdx = (page - 1) * ADMIN_PAGE_SIZE;
+    const { data: prods, count, error } = await q.range(
+      fromIdx,
+      fromIdx + ADMIN_PAGE_SIZE - 1
+    );
+    if (error) {
+      setProducts([]);
+      setListTotal(0);
+      setListLoading(false);
+      return;
+    }
+    setProducts(await attachSizes((prods as Product[]) || []));
+    setListTotal(count ?? 0);
+    setListLoading(false);
+  }
+
+  async function load() {
+    await loadMeta();
+    if (section === "lista") await loadLista();
+    else await loadCadastroProducts();
   }
 
   async function loadMovements(productId: string) {
@@ -128,8 +196,17 @@ export default function ProdutosAdmin({
   }
 
   useEffect(() => {
-    load();
+    void loadMeta();
   }, []);
+
+  useEffect(() => {
+    if (section === "lista") {
+      void loadLista(listPage, listStatus, listDateFrom, listDateTo);
+    } else {
+      void loadCadastroProducts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, listPage, listStatus, listDateFrom, listDateTo, searchParams]);
 
   useEffect(() => {
     if (section !== "cadastro" || products.length === 0) return;
@@ -721,53 +798,87 @@ export default function ProdutosAdmin({
       )}
 
       {section === "lista" && (
-        <AdminCard title="Lista">
-          <ul className="max-h-[600px] space-y-2 overflow-y-auto">
-            {products.map((p) => {
-              const total =
-                p.sizes?.reduce((s, row) => s + Number(row.stock || 0), 0) ??
-                (Number(p.stock) || 0);
-              return (
-                <li
-                  key={p.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    {p.image_urls?.[0] && (
-                      <img
-                        src={p.image_urls[0]}
-                        alt=""
-                        className="h-10 w-10 shrink-0 rounded object-cover"
-                      />
-                    )}
-                    <div className="min-w-0">
-                      <p className="font-medium">{p.name}</p>
-                      <p className="text-gray-400">
-                        {formatCurrency(Number(p.sale_price))} · Estoque {total}{" "}
-                        · {p.active ? "Ativo" : "Inativo"}
-                      </p>
+        <AdminCard title={`Lista (${listTotal})`}>
+          <AdminListFilters
+            dateFrom={listDateFrom}
+            dateTo={listDateTo}
+            onDateFrom={(v) => {
+              setListDateFrom(v);
+              setListPage(1);
+            }}
+            onDateTo={(v) => {
+              setListDateTo(v);
+              setListPage(1);
+            }}
+            status={listStatus}
+            onStatus={(v) => {
+              setListStatus(v);
+              setListPage(1);
+            }}
+            statusOptions={[
+              { value: "active", label: "Ativos" },
+              { value: "inactive", label: "Inativos" },
+              { value: "all", label: "Todos" },
+            ]}
+          />
+          {listLoading ? (
+            <p className="text-sm text-gray-400">Carregando…</p>
+          ) : products.length === 0 ? (
+            <p className="text-sm text-gray-400">Nenhum produto encontrado.</p>
+          ) : (
+            <ul className="space-y-2">
+              {products.map((p) => {
+                const total =
+                  p.sizes?.reduce((s, row) => s + Number(row.stock || 0), 0) ??
+                  (Number(p.stock) || 0);
+                return (
+                  <li
+                    key={p.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm"
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      {p.image_urls?.[0] && (
+                        <img
+                          src={p.image_urls[0]}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded object-cover"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium">{p.name}</p>
+                        <p className="text-gray-400">
+                          {formatCurrency(Number(p.sale_price))} · Estoque{" "}
+                          {total} · {p.active ? "Ativo" : "Inativo"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <AdminButton
-                      variant="secondary"
-                      onClick={() =>
-                        router.push(`/admin/produtos/cadastro?edit=${p.id}`)
-                      }
-                    >
-                      Editar
-                    </AdminButton>
-                    <AdminButton
-                      variant="secondary"
-                      onClick={() => toggleActive(p.id, p.active)}
-                    >
-                      {p.active ? "Arquivar" : "Ativar"}
-                    </AdminButton>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                    <div className="flex shrink-0 gap-2">
+                      <AdminButton
+                        variant="secondary"
+                        onClick={() =>
+                          router.push(`/admin/produtos/cadastro?edit=${p.id}`)
+                        }
+                      >
+                        Editar
+                      </AdminButton>
+                      <AdminButton
+                        variant="secondary"
+                        onClick={() => toggleActive(p.id, p.active)}
+                      >
+                        {p.active ? "Arquivar" : "Ativar"}
+                      </AdminButton>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <AdminPagination
+            page={listPage}
+            totalPages={Math.max(1, Math.ceil(listTotal / ADMIN_PAGE_SIZE))}
+            totalItems={listTotal}
+            onPageChange={setListPage}
+          />
         </AdminCard>
       )}
     </div>

@@ -11,6 +11,13 @@ import {
   AdminFormActions,
 } from "@/components/admin/AdminUI";
 import {
+  ADMIN_PAGE_SIZE,
+  AdminListFilters,
+  AdminPagination,
+  dayEndIso,
+  dayStartIso,
+} from "@/components/admin/AdminPagination";
+import {
   BRAZILIAN_STATES,
   addressFieldsFromCustomer,
   formatCustomerAddress,
@@ -88,6 +95,12 @@ export default function VendasAdmin({
   section: "nova" | "historico";
 }) {
   const [sales, setSales] = useState<SaleRow[]>([]);
+  const [salesTotal, setSalesTotal] = useState(0);
+  const [salesPage, setSalesPage] = useState(1);
+  const [salesDateFrom, setSalesDateFrom] = useState("");
+  const [salesDateTo, setSalesDateTo] = useState("");
+  const [salesStatus, setSalesStatus] = useState("active");
+  const [salesLoading, setSalesLoading] = useState(false);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [storeName, setStoreName] = useState("LM moda feminina");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -254,15 +267,10 @@ export default function VendasAdmin({
     };
   }, [form.product_id, form.product_size]);
 
-  async function load() {
+  async function loadCatalog() {
     const now = new Date().toISOString();
-    const [{ data: s }, { data: p }, { data: sizeRows }, { data: settings }, { data: promos }] =
+    const [{ data: p }, { data: sizeRows }, { data: settings }, { data: promos }] =
       await Promise.all([
-        supabase
-          .from("sales")
-          .select("*, sale_gifts(*)")
-          .order("created_at", { ascending: false })
-          .limit(50),
         supabase
           .from("products")
           .select("id, name, purchase_price, purchase_freight, sale_price")
@@ -288,7 +296,6 @@ export default function VendasAdmin({
       sizeMap[row.product_id][row.size] = Number(row.stock) || 0;
     }
 
-    setSales((s as SaleRow[]) || []);
     setProducts(
       (p || []).map((row) => ({
         id: row.id,
@@ -303,6 +310,47 @@ export default function VendasAdmin({
     );
     if (settings?.store_name) setStoreName(String(settings.store_name));
     setPromotions((promos as Promotion[]) || []);
+  }
+
+  async function loadSales(
+    page = salesPage,
+    status = salesStatus,
+    fromDate = salesDateFrom,
+    toDate = salesDateTo
+  ) {
+    setSalesLoading(true);
+    let q = supabase
+      .from("sales")
+      .select("*, sale_gifts(*)", { count: "exact" })
+      .order("created_at", { ascending: false });
+
+    if (status === "active") q = q.is("cancelled_at", null);
+    else if (status === "cancelled") q = q.not("cancelled_at", "is", null);
+
+    const fromIso = dayStartIso(fromDate);
+    const toIso = dayEndIso(toDate);
+    if (fromIso) q = q.gte("created_at", fromIso);
+    if (toIso) q = q.lte("created_at", toIso);
+
+    const fromIdx = (page - 1) * ADMIN_PAGE_SIZE;
+    const { data, count, error } = await q.range(
+      fromIdx,
+      fromIdx + ADMIN_PAGE_SIZE - 1
+    );
+    if (error) {
+      setSales([]);
+      setSalesTotal(0);
+      setSalesLoading(false);
+      return;
+    }
+    setSales((data as SaleRow[]) || []);
+    setSalesTotal(count ?? 0);
+    setSalesLoading(false);
+  }
+
+  async function load() {
+    await loadCatalog();
+    if (section === "historico") await loadSales();
   }
 
   async function loadGiftsForProduct(productId: string) {
@@ -327,8 +375,14 @@ export default function VendasAdmin({
   }
 
   useEffect(() => {
-    load();
+    void loadCatalog();
   }, []);
+
+  useEffect(() => {
+    if (section !== "historico") return;
+    void loadSales(salesPage, salesStatus, salesDateFrom, salesDateTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, salesPage, salesStatus, salesDateFrom, salesDateTo]);
 
   function resetSaleForm() {
     setForm({
@@ -912,8 +966,7 @@ export default function VendasAdmin({
     }
   }
 
-  const activeSales = sales.filter((s) => !s.cancelled_at);
-  const cancelledSales = sales.filter((s) => s.cancelled_at);
+  const salesTotalPages = Math.max(1, Math.ceil(salesTotal / ADMIN_PAGE_SIZE));
 
   return (
     <div>
@@ -1421,23 +1474,58 @@ export default function VendasAdmin({
       )}
 
       {section === "historico" && (
-        <AdminCard title={`Histórico (${activeSales.length})`}>
-          {activeSales.length === 0 ? (
-            <p className="text-sm text-gray-400">Nenhuma venda ainda.</p>
+        <AdminCard title={`Histórico (${salesTotal})`}>
+          <AdminListFilters
+            dateFrom={salesDateFrom}
+            dateTo={salesDateTo}
+            onDateFrom={(v) => {
+              setSalesDateFrom(v);
+              setSalesPage(1);
+            }}
+            onDateTo={(v) => {
+              setSalesDateTo(v);
+              setSalesPage(1);
+            }}
+            status={salesStatus}
+            onStatus={(v) => {
+              setSalesStatus(v);
+              setSalesPage(1);
+            }}
+            statusOptions={[
+              { value: "active", label: "Ativas" },
+              { value: "cancelled", label: "Canceladas" },
+              { value: "all", label: "Todas" },
+            ]}
+          />
+          {salesLoading ? (
+            <p className="text-sm text-gray-400">Carregando…</p>
+          ) : sales.length === 0 ? (
+            <p className="text-sm text-gray-400">Nenhuma venda encontrada.</p>
           ) : (
-            <ul className="max-h-[640px] space-y-2 overflow-y-auto text-sm">
-              {activeSales.map((s) => {
+            <ul className="space-y-2 text-sm">
+              {sales.map((s) => {
                 const open = expandedId === String(s.id);
+                const cancelled = Boolean(s.cancelled_at);
                 const gifts = Array.isArray(s.sale_gifts) ? s.sale_gifts : [];
                 const created = s.created_at
                   ? new Date(String(s.created_at)).toLocaleString("pt-BR")
                   : "";
                 return (
-                  <li key={String(s.id)} className="rounded-lg border p-3">
+                  <li
+                    key={String(s.id)}
+                    className={`rounded-lg border p-3 ${
+                      cancelled ? "border-gray-100 bg-gray-50/80 opacity-80" : ""
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="font-medium">
                           {String(s.product_name)}
+                          {cancelled ? (
+                            <span className="ml-2 text-xs font-normal text-red-500">
+                              Cancelada
+                            </span>
+                          ) : null}
                         </p>
                         <p className="text-gray-400">
                           {formatCurrency(Number(s.preco_final))} · Tam.{" "}
@@ -1552,6 +1640,14 @@ export default function VendasAdmin({
                               {String(s.notes)}
                             </p>
                           ) : null}
+                          {cancelled && s.cancelled_at ? (
+                            <p className="sm:col-span-2 text-red-500">
+                              Cancelada em{" "}
+                              {new Date(
+                                String(s.cancelled_at)
+                              ).toLocaleString("pt-BR")}
+                            </p>
+                          ) : null}
                         </div>
 
                         {gifts.length > 0 && (
@@ -1570,53 +1666,57 @@ export default function VendasAdmin({
                           </div>
                         )}
 
-                        <div className="rounded-xl border border-dashed border-gray-200 p-3">
-                          <p className="mb-1 text-sm font-medium">
-                            Frete real pago pela loja
-                          </p>
-                          <p className="mb-2 text-xs text-gray-500">
-                            Valor que a loja bancou no frete (Uber ou Melhor
-                            Envio), integral ou parcial. Substitui o provisório
-                            do cupom/promo.
-                          </p>
-                          <div className="flex flex-wrap items-end gap-2">
-                            <div className="min-w-[120px] flex-1">
-                              <AdminInput
-                                label="Valor (R$)"
-                                type="number"
-                                step="0.01"
-                                value={
-                                  ajusteDraft[String(s.id)] ??
-                                  String(Number(s.ajuste_valor) || 0)
-                                }
-                                onChange={(e) =>
-                                  setAjusteDraft((d) => ({
-                                    ...d,
-                                    [String(s.id)]: e.target.value,
-                                  }))
-                                }
-                              />
+                        {!cancelled && (
+                          <>
+                            <div className="rounded-xl border border-dashed border-gray-200 p-3">
+                              <p className="mb-1 text-sm font-medium">
+                                Frete real pago pela loja
+                              </p>
+                              <p className="mb-2 text-xs text-gray-500">
+                                Valor que a loja bancou no frete (Uber ou Melhor
+                                Envio), integral ou parcial. Substitui o
+                                provisório do cupom/promo.
+                              </p>
+                              <div className="flex flex-wrap items-end gap-2">
+                                <div className="min-w-[120px] flex-1">
+                                  <AdminInput
+                                    label="Valor (R$)"
+                                    type="number"
+                                    step="0.01"
+                                    value={
+                                      ajusteDraft[String(s.id)] ??
+                                      String(Number(s.ajuste_valor) || 0)
+                                    }
+                                    onChange={(e) =>
+                                      setAjusteDraft((d) => ({
+                                        ...d,
+                                        [String(s.id)]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                </div>
+                                <AdminButton
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={ajusteBusyId === String(s.id)}
+                                  onClick={() => saveSaleAjuste(String(s.id))}
+                                >
+                                  {ajusteBusyId === String(s.id)
+                                    ? "Salvando…"
+                                    : "Salvar ajuste"}
+                                </AdminButton>
+                              </div>
                             </div>
-                            <AdminButton
-                              type="button"
-                              variant="secondary"
-                              disabled={ajusteBusyId === String(s.id)}
-                              onClick={() => saveSaleAjuste(String(s.id))}
-                            >
-                              {ajusteBusyId === String(s.id)
-                                ? "Salvando…"
-                                : "Salvar ajuste"}
-                            </AdminButton>
-                          </div>
-                        </div>
 
-                        <AdminButton
-                          variant="danger"
-                          type="button"
-                          onClick={() => cancelSale(String(s.id))}
-                        >
-                          Cancelar venda
-                        </AdminButton>
+                            <AdminButton
+                              variant="danger"
+                              type="button"
+                              onClick={() => cancelSale(String(s.id))}
+                            >
+                              Cancelar venda
+                            </AdminButton>
+                          </>
+                        )}
                       </div>
                     )}
                   </li>
@@ -1624,25 +1724,12 @@ export default function VendasAdmin({
               })}
             </ul>
           )}
-
-          {cancelledSales.length > 0 && (
-            <div className="mt-6 border-t pt-4">
-              <p className="mb-2 text-xs font-semibold uppercase text-gray-400">
-                Canceladas ({cancelledSales.length})
-              </p>
-              <ul className="space-y-1 text-xs text-gray-400">
-                {cancelledSales.slice(0, 10).map((s) => (
-                  <li key={String(s.id)}>
-                    {String(s.product_name)} ·{" "}
-                    {formatCurrency(Number(s.preco_final))}
-                    {s.cancelled_at
-                      ? ` · ${new Date(String(s.cancelled_at)).toLocaleDateString("pt-BR")}`
-                      : ""}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <AdminPagination
+            page={salesPage}
+            totalPages={salesTotalPages}
+            totalItems={salesTotal}
+            onPageChange={setSalesPage}
+          />
         </AdminCard>
       )}
     </div>

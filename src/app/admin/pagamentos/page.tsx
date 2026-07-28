@@ -5,6 +5,13 @@ import { useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminCard, AdminButton } from "@/components/admin/AdminUI";
+import {
+  ADMIN_PAGE_SIZE,
+  AdminListFilters,
+  AdminPagination,
+  dayEndIso,
+  dayStartIso,
+} from "@/components/admin/AdminPagination";
 import { formatCurrency, formatCpf } from "@/lib/utils";
 import { orderStatusLabel } from "@/lib/order-status";
 
@@ -27,10 +34,24 @@ function isReissueable(order: OrderRow, payStatus: string | null): boolean {
   return false;
 }
 
+const ORDER_STATUS_OPTIONS = [
+  { value: "all", label: "Todos" },
+  { value: "pending_payment", label: "Aguardando PIX" },
+  { value: "paid", label: "Pago" },
+  { value: "cancelled", label: "Cancelado / expirado" },
+  { value: "refunded", label: "Reembolsado" },
+];
+
 export default function AdminPagamentosPage() {
   const searchParams = useSearchParams();
   const highlightOrder = searchParams.get("order");
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [status, setStatus] = useState("all");
+  const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [reissuingId, setReissuingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(
@@ -39,18 +60,53 @@ export default function AdminPagamentosPage() {
   const [message, setMessage] = useState("");
   const supabase = createClient();
 
-  async function load() {
-    const { data } = await supabase
+  async function load(
+    nextPage = page,
+    nextStatus = status,
+    fromDate = dateFrom,
+    toDate = dateTo
+  ) {
+    setLoading(true);
+    let q = supabase
       .from("orders")
-      .select("*, payments(*), order_items(*)")
-      .order("created_at", { ascending: false })
-      .limit(50);
+      .select("*, payments(*), order_items(*)", { count: "exact" })
+      .order("created_at", { ascending: false });
+
+    if (nextStatus === "pending_payment") {
+      q = q.eq("status", "pending_payment");
+    } else if (nextStatus === "paid") {
+      q = q.in("status", ["paid", "approved"]);
+    } else if (nextStatus === "cancelled") {
+      q = q.in("status", ["cancelled", "canceled", "expired"]);
+    } else if (nextStatus === "refunded") {
+      q = q.in("status", ["refunded", "refund_requested"]);
+    }
+
+    const fromIso = dayStartIso(fromDate);
+    const toIso = dayEndIso(toDate);
+    if (fromIso) q = q.gte("created_at", fromIso);
+    if (toIso) q = q.lte("created_at", toIso);
+
+    const fromIdx = (nextPage - 1) * ADMIN_PAGE_SIZE;
+    const { data, count, error } = await q.range(
+      fromIdx,
+      fromIdx + ADMIN_PAGE_SIZE - 1
+    );
+    if (error) {
+      setOrders([]);
+      setTotal(0);
+      setLoading(false);
+      return;
+    }
     setOrders((data as OrderRow[]) || []);
+    setTotal(count ?? 0);
+    setLoading(false);
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    void load(page, status, dateFrom, dateTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, status, dateFrom, dateTo]);
 
   useEffect(() => {
     if (highlightOrder) setExpandedId(highlightOrder);
@@ -112,14 +168,18 @@ export default function AdminPagamentosPage() {
           `Novo PIX gerado (${formatCurrency(Number(data.total) || 0)}). Pedido #${String(data.order_id).slice(0, 8)}.`
         );
         setExpandedId(String(data.order_id));
+        setStatus("all");
+        setPage(1);
       }
-      await load();
+      await load(1, "all", dateFrom, dateTo);
     } catch {
       setMessage("Erro de rede ao gerar novo PIX.");
     } finally {
       setReissuingId(null);
     }
   }
+
+  const totalPages = Math.max(1, Math.ceil(total / ADMIN_PAGE_SIZE));
 
   return (
     <div>
@@ -139,9 +199,29 @@ export default function AdminPagamentosPage() {
           {message}
         </p>
       )}
-      <AdminCard title="Pedidos online">
-        {orders.length === 0 ? (
-          <p className="text-sm text-gray-400">Nenhum pedido ainda.</p>
+      <AdminCard title={`Pedidos online (${total})`}>
+        <AdminListFilters
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFrom={(v) => {
+            setDateFrom(v);
+            setPage(1);
+          }}
+          onDateTo={(v) => {
+            setDateTo(v);
+            setPage(1);
+          }}
+          status={status}
+          onStatus={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+          statusOptions={ORDER_STATUS_OPTIONS}
+        />
+        {loading ? (
+          <p className="text-sm text-gray-400">Carregando…</p>
+        ) : orders.length === 0 ? (
+          <p className="text-sm text-gray-400">Nenhum pedido encontrado.</p>
         ) : (
           <ul className="space-y-3">
             {orders.map((o) => {
@@ -321,9 +401,12 @@ export default function AdminPagamentosPage() {
                       String(o.status) === "pending_payment" &&
                       !(
                         payStatus &&
-                        ["cancelled", "canceled", "rejected", "expired"].includes(
-                          payStatus
-                        )
+                        [
+                          "cancelled",
+                          "canceled",
+                          "rejected",
+                          "expired",
+                        ].includes(payStatus)
                       ) ? (
                         <p className="break-all text-xs text-gray-400">
                           PIX: {String(payment.pix_copy_paste).slice(0, 80)}…
@@ -336,6 +419,12 @@ export default function AdminPagamentosPage() {
             })}
           </ul>
         )}
+        <AdminPagination
+          page={page}
+          totalPages={totalPages}
+          totalItems={total}
+          onPageChange={setPage}
+        />
       </AdminCard>
     </div>
   );
