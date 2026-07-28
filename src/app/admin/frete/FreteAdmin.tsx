@@ -205,7 +205,7 @@ export default function FreteAdmin({
         {section === "melhor_envio"
           ? "Melhor Envio"
           : section === "remetente"
-            ? "Endereço remetente"
+            ? "Endereço da loja"
             : "Regras de frete"}
       </h1>
 
