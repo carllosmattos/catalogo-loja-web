@@ -1,12 +1,12 @@
 "use client";
 
 import { Suspense } from "react";
-import VendasAdmin from "./VendasAdmin";
+import BrindesAdmin from "../BrindesAdmin";
 
 export default function Page() {
   return (
     <Suspense fallback={<p className="text-sm text-gray-400">Carregando…</p>}>
-      <VendasAdmin section="nova" />
+      <BrindesAdmin section="cadastro" />
     </Suspense>
   );
 }
