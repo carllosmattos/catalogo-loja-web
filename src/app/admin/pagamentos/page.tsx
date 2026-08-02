@@ -39,10 +39,18 @@ const ORDER_STATUS_OPTIONS = [
   { value: "all", label: "Todos" },
   { value: "pending_payment", label: "Aguardando PIX" },
   { value: "paid", label: "Pago" },
+  { value: "shipped", label: "Enviado" },
+  { value: "received", label: "Recebido" },
   { value: "refund_requested", label: "Aguardando devolução" },
   { value: "cancelled", label: "Cancelado / expirado" },
   { value: "refunded", label: "Reembolsado" },
 ];
+
+function isUberOrder(o: OrderRow): boolean {
+  const method = String(o.shipping_method || "").toLowerCase();
+  const label = String(o.shipping_label || o.notes || "");
+  return method === "uber" || /uber/i.test(label);
+}
 
 export default function AdminPagamentosPage() {
   const searchParams = useSearchParams();
@@ -56,6 +64,10 @@ export default function AdminPagamentosPage() {
   const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [reissuingId, setReissuingId] = useState<string | null>(null);
+  const [shippingId, setShippingId] = useState<string | null>(null);
+  const [shipBusyId, setShipBusyId] = useState<string | null>(null);
+  const [trackCode, setTrackCode] = useState("");
+  const [trackUrl, setTrackUrl] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(
     highlightOrder || null
   );
@@ -78,6 +90,10 @@ export default function AdminPagamentosPage() {
       q = q.eq("status", "pending_payment");
     } else if (nextStatus === "paid") {
       q = q.in("status", ["paid", "approved"]);
+    } else if (nextStatus === "shipped") {
+      q = q.eq("status", "shipped");
+    } else if (nextStatus === "received") {
+      q = q.eq("status", "received");
     } else if (nextStatus === "refund_requested") {
       q = q.in("status", ["refund_requested", "awaiting_return"]);
     } else if (nextStatus === "cancelled") {
@@ -183,6 +199,39 @@ export default function AdminPagamentosPage() {
       setMessage("Erro de rede ao gerar novo PIX.");
     } finally {
       setReissuingId(null);
+    }
+  }
+
+  async function shipOrder(order: OrderRow) {
+    setShipBusyId(String(order.id));
+    setMessage("");
+    try {
+      const uber = isUberOrder(order);
+      const res = await fetch("/api/admin/orders/ship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: order.id,
+          trackingCode: uber ? "" : trackCode,
+          trackingUrl: uber ? "" : trackUrl,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(String(data.error || "Falha ao marcar enviado"));
+      } else {
+        setMessage(
+          `Pedido #${String(order.id).slice(0, 8)} marcado como enviado. E-mail disparado.`
+        );
+        setShippingId(null);
+        setTrackCode("");
+        setTrackUrl("");
+      }
+      await load();
+    } catch {
+      setMessage("Erro de rede ao marcar enviado.");
+    } finally {
+      setShipBusyId(null);
     }
   }
 
@@ -333,11 +382,97 @@ export default function AdminPagamentosPage() {
                             : "Gerar novo PIX"}
                         </AdminButton>
                       )}
+                      {String(o.status) === "paid" && (
+                        <AdminButton
+                          type="button"
+                          variant="secondary"
+                          disabled={shipBusyId === String(o.id)}
+                          onClick={() => {
+                            setExpandedId(String(o.id));
+                            setShippingId(String(o.id));
+                            setTrackCode("");
+                            setTrackUrl("");
+                          }}
+                        >
+                          Marcar enviado
+                        </AdminButton>
+                      )}
                     </div>
                   </div>
 
                   {open && (
                     <div className="mt-4 space-y-3 border-t pt-3 text-sm">
+                      {shippingId === String(o.id) &&
+                        String(o.status) === "paid" && (
+                          <div className="rounded-xl border border-green-200 bg-green-50 p-3 space-y-2">
+                            <p className="font-medium text-green-900">
+                              Marcar como enviado
+                            </p>
+                            {isUberOrder(o) ? (
+                              <p className="text-xs text-green-800">
+                                Frete Uber — sem código de rastreio. O cliente
+                                recebe e-mail avisando que saiu para entrega.
+                              </p>
+                            ) : (
+                              <>
+                                <p className="text-xs text-green-800">
+                                  Frete transportadora/Correios — informe o
+                                  rastreio (opcional) para o e-mail do cliente.
+                                </p>
+                                <input
+                                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                                  placeholder="Código de rastreio"
+                                  value={trackCode}
+                                  onChange={(e) => setTrackCode(e.target.value)}
+                                />
+                                <input
+                                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                                  placeholder="URL de rastreio (https://…)"
+                                  value={trackUrl}
+                                  onChange={(e) => setTrackUrl(e.target.value)}
+                                />
+                              </>
+                            )}
+                            <div className="flex flex-wrap gap-2">
+                              <AdminButton
+                                type="button"
+                                disabled={shipBusyId === String(o.id)}
+                                onClick={() => shipOrder(o)}
+                              >
+                                {shipBusyId === String(o.id)
+                                  ? "Enviando…"
+                                  : "Confirmar envio + e-mail"}
+                              </AdminButton>
+                              <AdminButton
+                                type="button"
+                                variant="secondary"
+                                onClick={() => setShippingId(null)}
+                              >
+                                Cancelar
+                              </AdminButton>
+                            </div>
+                          </div>
+                        )}
+                      {(String(o.status) === "shipped" ||
+                        String(o.status) === "received") &&
+                        (Boolean(o.tracking_code) || Boolean(o.tracking_url)) && (
+                          <p className="text-xs text-gray-600">
+                            Rastreio: {String(o.tracking_code || "—")}
+                            {o.tracking_url ? (
+                              <>
+                                {" · "}
+                                <a
+                                  href={String(o.tracking_url)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[var(--color-primary)] underline"
+                                >
+                                  Abrir link
+                                </a>
+                              </>
+                            ) : null}
+                          </p>
+                        )}
                       <div className="grid gap-1 text-gray-600 sm:grid-cols-2">
                         {o.customer_phone ? (
                           <p>

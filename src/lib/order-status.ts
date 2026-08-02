@@ -4,6 +4,8 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: "Aguardando pagamento",
   paid: "Pago",
   approved: "Pago",
+  shipped: "Enviado",
+  received: "Recebido",
   cancelled: "Cancelado",
   canceled: "Cancelado",
   refund_requested: "Aguardando devolução",

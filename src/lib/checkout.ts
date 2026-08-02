@@ -211,17 +211,19 @@ export async function startPixCheckout(
       ? shippingCouponDiscount
       : shippingDiscountTotal;
 
-  if (freteAbsorvido > 0) {
+  if (freteAbsorvido > 0 || shippingMethod) {
     try {
       const adminDb = await createServiceClient();
-      await adminDb
-        .from("orders")
-        .update({
-          frete_absorvido: Math.round(freteAbsorvido * 100) / 100,
-        })
-        .eq("id", orderId);
+      const patch: Record<string, unknown> = {
+        shipping_method: shippingMethod === "uber" ? "uber" : "delivery",
+        shipping_label: String(shipping.label || "").slice(0, 200),
+      };
+      if (freteAbsorvido > 0) {
+        patch.frete_absorvido = Math.round(freteAbsorvido * 100) / 100;
+      }
+      await adminDb.from("orders").update(patch).eq("id", orderId);
     } catch {
-      // Coluna pode não existir até a migration 037
+      // Colunas podem não existir até as migrations
     }
   }
 

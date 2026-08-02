@@ -236,14 +236,26 @@ export async function saveCustomerProfile(
   return data as Customer;
 }
 
-export async function listCustomerOrders(customerId: string) {
+export async function listCustomerOrders(
+  customerId: string,
+  opts?: { limit?: number; offset?: number }
+) {
   const supabase = await createClient();
+  const limit = opts?.limit ?? 20;
+  const offset = opts?.offset ?? 0;
   const { data, error } = await supabase.rpc("list_orders_by_customer", {
     p_customer_id: customerId,
-    p_limit: 30,
+    p_limit: limit,
+    p_offset: offset,
   });
-  if (error) return { orders: [], error: error.message };
-  return { orders: (data as unknown[]) || [], error: null };
+  if (error) return { orders: [], total: 0, error: error.message };
+  const payload = data as { items?: unknown[]; total?: number } | unknown[];
+  if (Array.isArray(payload)) {
+    return { orders: payload, total: payload.length, error: null };
+  }
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const total = Number(payload?.total) || items.length;
+  return { orders: items, total, error: null };
 }
 
 export async function getOrderByTracking(token: string) {

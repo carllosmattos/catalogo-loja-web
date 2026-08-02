@@ -4,6 +4,7 @@ import { appBaseUrl } from "@/lib/payments";
 import { formatCurrency, isValidEmail, normalizeEmail } from "@/lib/utils";
 
 const EMAIL_KIND_PAID = "paid" as const;
+const EMAIL_KIND_SHIPPED = "shipped" as const;
 
 const BRAND = {
   primary: "#8B0A50",
@@ -47,6 +48,13 @@ type PaidEmailPayload = {
   total: string;
   orderUrl: string;
   items: PaidEmailItem[];
+};
+
+type ShippedEmailPayload = PaidEmailPayload & {
+  isUber: boolean;
+  trackingCode: string;
+  trackingUrl: string;
+  shippingLabel: string;
 };
 
 /**
@@ -374,6 +382,376 @@ export function buildPaidEmailHtml(p: PaidEmailPayload): string {
               </p>
               <p style="margin:6px 0 0;font-family:system-ui,-apple-system,sans-serif;font-size:11px;color:${BRAND.muted};">
                 Moda feminina com carinho · Este e-mail confirma seu pagamento PIX
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * E-mail de pedido enviado (1x). Uber: sem rastreio. Delivery: código/URL se houver.
+ */
+export async function sendShippedEmailIfNeeded(orderId: string): Promise<void> {
+  try {
+    const resend = resendClient();
+    if (!resend) {
+      console.info("[email] RESEND_API_KEY ausente — skip shipped email", orderId);
+      return;
+    }
+
+    const supabase = await createServiceClient();
+
+    const { data: order, error: orderErr } = await supabase
+      .from("orders")
+      .select(
+        "id, total_amount, tracking_token, customer_id, customer_name, customer_email, status, shipping_method, shipping_label, tracking_code, tracking_url"
+      )
+      .eq("id", orderId)
+      .maybeSingle();
+
+    if (orderErr || !order) {
+      console.error("[email] pedido não encontrado (shipped)", orderId, orderErr);
+      return;
+    }
+
+    let to =
+      typeof order.customer_email === "string" ? order.customer_email : "";
+    if ((!to || !isValidEmail(to)) && order.customer_id) {
+      const { data: customer } = await supabase
+        .from("customers")
+        .select("email")
+        .eq("id", order.customer_id)
+        .maybeSingle();
+      to = typeof customer?.email === "string" ? customer.email : "";
+    }
+
+    to = normalizeEmail(to);
+    if (!isValidEmail(to)) {
+      console.info("[email] sem e-mail válido (shipped)", orderId);
+      return;
+    }
+
+    const testTo = normalizeEmail(process.env.EMAIL_TEST_TO || "");
+    if (isValidEmail(testTo)) {
+      console.info("[email] EMAIL_TEST_TO ativo", to, "→", testTo);
+      to = testTo;
+    }
+
+    const { error: claimErr } = await supabase.from("order_email_log").insert({
+      order_id: orderId,
+      kind: EMAIL_KIND_SHIPPED,
+    });
+
+    if (claimErr) {
+      if (
+        claimErr.code === "23505" ||
+        /duplicate|unique/i.test(claimErr.message || "")
+      ) {
+        return;
+      }
+      console.error("[email] claim shipped", claimErr);
+      return;
+    }
+
+    const { data: settings } = await supabase
+      .from("store_settings")
+      .select(
+        "store_name, logo_url, primary_color, secondary_color, accent_color, whatsapp_number"
+      )
+      .limit(1)
+      .maybeSingle();
+
+    const { data: itemRows } = await supabase
+      .from("order_items")
+      .select("product_name, product_size, quantity, preco_final_line")
+      .eq("order_id", orderId)
+      .order("created_at", { ascending: true });
+
+    const storeName =
+      (typeof settings?.store_name === "string" && settings.store_name) ||
+      "LM Moda Feminina";
+    const primary =
+      (typeof settings?.primary_color === "string" && settings.primary_color) ||
+      BRAND.primary;
+    const secondary =
+      (typeof settings?.secondary_color === "string" &&
+        settings.secondary_color) ||
+      BRAND.secondary;
+    const accent =
+      (typeof settings?.accent_color === "string" && settings.accent_color) ||
+      BRAND.accent;
+    const logoFromSettings =
+      typeof settings?.logo_url === "string" && settings.logo_url.trim()
+        ? settings.logo_url.trim()
+        : "";
+    const base = appBaseUrl();
+    const logoUrl = absoluteAssetUrl(logoFromSettings || "/logo-lm.png", base);
+    const whatsapp =
+      typeof settings?.whatsapp_number === "string" &&
+      settings.whatsapp_number.trim()
+        ? settings.whatsapp_number.trim()
+        : null;
+
+    const shortId = String(order.id).slice(0, 8).toUpperCase();
+    const total = formatCurrency(Number(order.total_amount) || 0);
+    const token = String(order.tracking_token || "");
+    const orderUrl = token
+      ? `${base}/pedidos/${token}`
+      : `${base}/pedidos`;
+    const customerName =
+      (typeof order.customer_name === "string" && order.customer_name.trim()) ||
+      "Cliente";
+
+    const method = String(order.shipping_method || "delivery").toLowerCase();
+    const label = String(order.shipping_label || "");
+    const isUber =
+      method === "uber" || /uber/i.test(label);
+
+    const items: PaidEmailItem[] = (itemRows || []).map((row) => ({
+      product_name: String(row.product_name || "Item"),
+      product_size:
+        row.product_size != null ? String(row.product_size) : null,
+      quantity: Number(row.quantity) || 1,
+      preco_final_line: Number(row.preco_final_line) || 0,
+    }));
+
+    const html = buildShippedEmailHtml({
+      storeName,
+      logoUrl,
+      primaryColor: primary,
+      secondaryColor: secondary,
+      accentColor: accent,
+      whatsappNumber: whatsapp,
+      customerName,
+      shortId,
+      total,
+      orderUrl,
+      items,
+      isUber,
+      trackingCode: isUber ? "" : String(order.tracking_code || "").trim(),
+      trackingUrl: isUber ? "" : String(order.tracking_url || "").trim(),
+      shippingLabel: label || (isUber ? "Uber" : "Entrega"),
+    });
+
+    const { error: sendErr } = await resend.emails.send({
+      from: emailFrom(),
+      to: [to],
+      subject: `${storeName} — pedido enviado (#${shortId})`,
+      html,
+    });
+
+    if (sendErr) {
+      console.error("[email] Resend shipped falhou — liberando claim", sendErr);
+      await supabase
+        .from("order_email_log")
+        .delete()
+        .eq("order_id", orderId)
+        .eq("kind", EMAIL_KIND_SHIPPED);
+      return;
+    }
+
+    console.info("[email] shipped enviado", orderId, to);
+  } catch (e) {
+    console.error("[email] sendShippedEmailIfNeeded", e);
+  }
+}
+
+export function buildShippedEmailHtml(p: ShippedEmailPayload): string {
+  const primary = p.primaryColor || BRAND.primary;
+  const secondary = p.secondaryColor || BRAND.secondary;
+  const accent = p.accentColor || BRAND.accent;
+  const statusGreen = "#15803d";
+  const firstName = p.customerName.split(/\s+/)[0] || p.customerName;
+
+  const logoBlock = p.logoUrl
+    ? `<img src="${escapeHtml(p.logoUrl)}" alt="${escapeHtml(p.storeName)}" width="88" height="88" style="display:block;margin:0 auto 14px;border-radius:50%;border:3px solid ${secondary};background:${BRAND.white};object-fit:cover;" />`
+    : "";
+
+  const itemRows =
+    p.items.length > 0
+      ? p.items
+          .map((item, i) => {
+            const size =
+              item.product_size && item.product_size !== "U"
+                ? ` · Tam. ${escapeHtml(item.product_size)}`
+                : "";
+            const border =
+              i < p.items.length - 1
+                ? `border-bottom:1px solid ${BRAND.border};`
+                : "";
+            return `
+              <tr>
+                <td style="padding:12px 0;${border}vertical-align:top;">
+                  <p style="margin:0;font-size:14px;font-weight:600;color:${BRAND.text};">
+                    ${escapeHtml(item.product_name)}
+                  </p>
+                  <p style="margin:4px 0 0;font-size:12px;color:${BRAND.muted};">
+                    Qtd. ${item.quantity}${size}
+                  </p>
+                </td>
+                <td style="padding:12px 0;${border}vertical-align:top;text-align:right;white-space:nowrap;font-size:14px;font-weight:600;color:${BRAND.text};">
+                  ${escapeHtml(formatCurrency(item.preco_final_line))}
+                </td>
+              </tr>`;
+          })
+          .join("")
+      : "";
+
+  const trackingBlock = p.isUber
+    ? `
+      <tr>
+        <td style="padding:0 28px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ecfdf5;border-radius:16px;border:1px solid #bbf7d0;">
+            <tr><td style="padding:16px 18px;font-family:system-ui,sans-serif;">
+              <p style="margin:0;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${statusGreen};font-weight:700;">Entrega Uber</p>
+              <p style="margin:8px 0 0;font-size:14px;line-height:1.5;color:${BRAND.text};">
+                Seu pedido saiu para entrega via Uber. Combine o recebimento com a loja pelo WhatsApp se precisar.
+              </p>
+            </td></tr>
+          </table>
+        </td>
+      </tr>`
+    : p.trackingCode || p.trackingUrl
+      ? `
+      <tr>
+        <td style="padding:0 28px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ecfdf5;border-radius:16px;border:1px solid #bbf7d0;">
+            <tr><td style="padding:16px 18px;font-family:system-ui,sans-serif;">
+              <p style="margin:0;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${statusGreen};font-weight:700;">Rastreio</p>
+              ${
+                p.trackingCode
+                  ? `<p style="margin:8px 0 0;font-size:14px;color:${BRAND.text};">Código: <strong>${escapeHtml(p.trackingCode)}</strong></p>`
+                  : ""
+              }
+              ${
+                p.shippingLabel
+                  ? `<p style="margin:4px 0 0;font-size:12px;color:${BRAND.muted};">${escapeHtml(p.shippingLabel)}</p>`
+                  : ""
+              }
+              ${
+                p.trackingUrl
+                  ? `<p style="margin:14px 0 0;"><a href="${escapeHtml(p.trackingUrl)}" style="display:inline-block;background:${statusGreen};color:${BRAND.white};text-decoration:none;padding:10px 20px;border-radius:999px;font-size:13px;font-weight:700;">Rastrear encomenda</a></p>`
+                  : ""
+              }
+            </td></tr>
+          </table>
+        </td>
+      </tr>`
+      : `
+      <tr>
+        <td style="padding:0 28px 16px;">
+          <p style="margin:0;font-family:system-ui,sans-serif;font-size:13px;color:${BRAND.muted};">
+            Frete: ${escapeHtml(p.shippingLabel || "Entrega")}. Em breve você poderá acompanhar pelos Correios ou transportadora.
+          </p>
+        </td>
+      </tr>`;
+
+  const wa = (p.whatsappNumber || "").replace(/\D/g, "");
+  const waBlock = wa
+    ? `
+      <tr>
+        <td align="center" style="padding:0 28px 8px;">
+          <p style="margin:0;font-size:13px;color:${BRAND.muted};">
+            Dúvidas?
+            <a href="https://wa.me/${wa}" style="color:${primary};font-weight:600;text-decoration:none;">
+              Fale conosco no WhatsApp
+            </a>
+          </p>
+        </td>
+      </tr>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pedido enviado</title>
+</head>
+<body style="margin:0;padding:0;background:${accent};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${accent};padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:${BRAND.white};border-radius:20px;overflow:hidden;box-shadow:0 8px 30px rgba(139,10,80,0.08);">
+          <tr>
+            <td style="background:${primary};padding:28px 24px 24px;text-align:center;">
+              ${logoBlock}
+              <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:22px;letter-spacing:0.04em;color:${BRAND.white};font-weight:700;">
+                ${escapeHtml(p.storeName)}
+              </p>
+              <p style="margin:8px 0 0;font-family:system-ui,-apple-system,sans-serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:${statusGreen};font-weight:700;">
+                Pedido enviado
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="height:3px;background:linear-gradient(90deg,${secondary},${primary},${secondary});font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding:28px 28px 8px;font-family:system-ui,-apple-system,sans-serif;color:${BRAND.text};">
+              <p style="margin:0 0 8px;font-size:18px;font-weight:600;">
+                Olá, ${escapeHtml(firstName)}!
+              </p>
+              <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${BRAND.muted};">
+                Seu pedido <strong style="color:${primary};">#${escapeHtml(p.shortId)}</strong> saiu para entrega.
+                Quando receber, confirme o recebimento na página do pedido.
+              </p>
+            </td>
+          </tr>
+          ${trackingBlock}
+          <tr>
+            <td style="padding:0 28px 8px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${accent};border-radius:16px;padding:4px 16px;">
+                <tr>
+                  <td style="padding:16px 4px 4px;">
+                    <p style="margin:0;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${primary};font-weight:700;">
+                      Itens
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0 4px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                      ${itemRows}
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 4px 16px;border-top:1px solid ${BRAND.border};">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="font-size:13px;color:${BRAND.muted};">Total</td>
+                        <td style="text-align:right;font-size:18px;font-weight:700;color:${primary};">
+                          ${escapeHtml(p.total)}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:24px 28px 8px;">
+              <a href="${escapeHtml(p.orderUrl)}"
+                 style="display:inline-block;background:${primary};color:${BRAND.white};text-decoration:none;padding:14px 28px;border-radius:999px;font-family:system-ui,sans-serif;font-size:14px;font-weight:700;">
+                Ver pedido / confirmar recebimento
+              </a>
+            </td>
+          </tr>
+          ${waBlock}
+          <tr>
+            <td style="padding:20px 28px 28px;border-top:1px solid ${BRAND.border};text-align:center;">
+              <p style="margin:0;font-family:Georgia,serif;font-size:13px;color:${primary};">
+                ${escapeHtml(p.storeName)}
+              </p>
+              <p style="margin:6px 0 0;font-size:11px;color:${BRAND.muted};">
+                Moda feminina com carinho
               </p>
             </td>
           </tr>

@@ -324,15 +324,21 @@ export async function startAdminPixSale(input: AdminPixSaleInput) {
   const total = Number(orderData.total_amount);
   const expiresAt = String(orderData.expires_at || "");
 
-  if (pricing.frete_absorvido > 0) {
-    try {
-      await supabase
-        .from("orders")
-        .update({ frete_absorvido: pricing.frete_absorvido })
-        .eq("id", orderId);
-    } catch {
-      // Migration 037 ainda não aplicada
+  try {
+    const patch: Record<string, unknown> = {
+      shipping_method: input.shippingMethod === "uber" ? "uber" : "delivery",
+      shipping_label: String(
+        input.shippingMethod === "uber"
+          ? "Uber"
+          : input.shippingLabel || "Entrega"
+      ).slice(0, 200),
+    };
+    if (pricing.frete_absorvido > 0) {
+      patch.frete_absorvido = pricing.frete_absorvido;
     }
+    await supabase.from("orders").update(patch).eq("id", orderId);
+  } catch {
+    // Migrations ainda não aplicadas
   }
 
   const couponRedeemAmt =

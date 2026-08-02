@@ -64,7 +64,7 @@ export function OrderDetailClient({
   const [copied, setCopied] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [busy, setBusy] = useState<
-    "cancel" | "delete" | "refund" | "reissue" | null
+    "cancel" | "delete" | "refund" | "reissue" | "receive" | null
   >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reissueResult, setReissueResult] = useState<{
@@ -230,6 +230,29 @@ export function OrderDetailClient({
     await refresh();
   }
 
+  async function markReceived() {
+    if (!bundle?.order?.id || !customer?.id || busy) return;
+    setBusy("receive");
+    setActionError(null);
+    const res = await fetch("/api/orders/received", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId: bundle.order.id,
+        customerId: customer.id,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      setActionError(
+        String(data.error || "Não foi possível confirmar o recebimento.")
+      );
+      return;
+    }
+    await refresh();
+  }
+
   const status = String(bundle?.order?.status || "");
   const paymentStatus = String(bundle?.payment?.status || "");
   const payDead = isTerminalPayStatus(paymentStatus);
@@ -290,6 +313,50 @@ export function OrderDetailClient({
           <p className="mt-2 text-2xl font-bold text-[var(--color-primary)]">
             {formatCurrency(Number(order.total_amount))}
           </p>
+
+          {status === "shipped" && (
+            <div className="mt-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+              <p className="font-medium">Pedido a caminho</p>
+              {String(order.shipping_method || "") === "uber" ||
+              /uber/i.test(String(order.shipping_label || "")) ? (
+                <p className="mt-1 text-xs text-green-800">
+                  Entrega via Uber. Quando receber, confirme abaixo.
+                </p>
+              ) : (
+                <div className="mt-2 space-y-1 text-xs text-green-800">
+                  {order.tracking_code ? (
+                    <p>
+                      Código: <strong>{String(order.tracking_code)}</strong>
+                    </p>
+                  ) : null}
+                  {order.tracking_url ? (
+                    <p>
+                      <a
+                        href={String(order.tracking_url)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold underline"
+                      >
+                        Rastrear no site da transportadora
+                      </a>
+                    </p>
+                  ) : (
+                    <p>Quando receber, confirme abaixo.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {status === "received" && (
+            <div className="mt-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+              Recebimento confirmado
+              {order.received_at
+                ? ` em ${new Date(String(order.received_at)).toLocaleString("pt-BR")}`
+                : ""}
+              .
+            </div>
+          )}
 
           {showActivePix && pixCode && (
             <div className="mt-4 rounded-2xl bg-[var(--color-accent)] p-4">
@@ -380,7 +447,19 @@ export function OrderDetailClient({
                 {busy === "cancel" ? "Cancelando..." : "Cancelar pedido"}
               </button>
             )}
-            {status === "paid" && customer && (
+            {status === "shipped" && customer && (
+              <button
+                type="button"
+                onClick={markReceived}
+                disabled={Boolean(busy)}
+                className={cn("py-2", STORE_BTN_PRIMARY)}
+              >
+                {busy === "receive"
+                  ? "Confirmando…"
+                  : "Confirmar que recebi o pedido"}
+              </button>
+            )}
+            {(status === "paid" || status === "shipped") && customer && (
               <>
                 {!refundOpen ? (
                   <button

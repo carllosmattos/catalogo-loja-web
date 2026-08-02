@@ -9,6 +9,10 @@ import {
   AdminFormActions,
 } from "@/components/admin/AdminUI";
 import { ImageUploadField } from "@/components/admin/ImageUploadField";
+import {
+  ADMIN_PAGE_SIZE,
+  AdminPagination,
+} from "@/components/admin/AdminPagination";
 import { formatCurrency } from "@/lib/utils";
 import type { Coupon } from "@/types";
 
@@ -49,6 +53,8 @@ export default function CuponsAdmin({
   section: "cadastro" | "lista";
 }) {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [listTotal, setListTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [promoKind, setPromoKind] = useState<"VERAO" | "FRETE" | "OUTRO">(
     "VERAO"
   );
@@ -84,17 +90,21 @@ export default function CuponsAdmin({
     }
   }, [promoKind]);
 
-  async function load() {
-    const { data } = await supabase
+  async function load(nextPage = page) {
+    const fromIdx = (nextPage - 1) * ADMIN_PAGE_SIZE;
+    const { data, count } = await supabase
       .from("coupons")
-      .select("*")
-      .order("created_at", { ascending: false });
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(fromIdx, fromIdx + ADMIN_PAGE_SIZE - 1);
     setCoupons((data as Coupon[]) || []);
+    setListTotal(count ?? 0);
+    setPage(nextPage);
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    if (section === "lista") load(1);
+  }, [section]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -137,7 +147,7 @@ export default function CuponsAdmin({
     setCustomTipo("");
     setSuffix(randomSuffix());
     setMessage("Cupom criado");
-    load();
+    load(1);
   }
 
   async function setActive(id: string, active: boolean) {
@@ -145,7 +155,7 @@ export default function CuponsAdmin({
       .from("coupons")
       .update({ active, updated_at: new Date().toISOString() })
       .eq("id", id);
-    load();
+    load(page);
   }
 
   return (
@@ -324,6 +334,12 @@ export default function CuponsAdmin({
               </li>
             ))}
           </ul>
+          <AdminPagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil(listTotal / ADMIN_PAGE_SIZE))}
+            totalItems={listTotal}
+            onPageChange={(p) => load(p)}
+          />
         </AdminCard>
       )}
     </div>
