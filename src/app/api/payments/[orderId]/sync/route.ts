@@ -96,8 +96,8 @@ export async function POST(
     }
 
     if (status === "approved") {
-      // Fire-and-forget: nunca falhar o sync por causa do e-mail
-      void sendPaidEmailIfNeeded(orderId);
+      // Await: na Vercel o fire-and-forget (void) pode morrer ao fechar a response
+      await sendPaidEmailIfNeeded(orderId);
     }
 
     return NextResponse.json({
