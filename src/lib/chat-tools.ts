@@ -86,6 +86,19 @@ export async function toolSearchProducts(query: string, limit = 6) {
   return { products: cards, note: null as string | null };
 }
 
+export async function toolListRecentProducts(limit = 8) {
+  const supabase = await createServiceClient();
+  const { data } = await supabase
+    .from("products")
+    .select("*")
+    .eq("active", true)
+    .order("created_at", { ascending: false })
+    .limit(Math.min(12, Math.max(1, limit)));
+  const withSizes = await attachSizesLocal(data || []);
+  const cards = await Promise.all(withSizes.map(toCard));
+  return { products: cards, note: null as string | null };
+}
+
 export async function toolGetProduct(productId: string) {
   const product = await fetchProduct(productId);
   if (!product) return { error: "Produto não encontrado", product: null };
@@ -344,7 +357,13 @@ export async function runChatTool(
 export function buildSystemPrompt(storeName: string): string {
   return `Você é a consultora de vendas da loja de moda feminina "${storeName}".
 Só fala de: peças, tamanhos, estoque, preços, promoções, frete em termos gerais, cupons e pedidos desta loja.
-Não invente preço, estoque ou cupom — use apenas resultados das tools.
+
+REGRA CRÍTICA DE DADOS:
+- Nunca invente preço, estoque, tamanho ou cupom.
+- Só use números e nomes que aparecerem nos resultados das tools ou no bloco "DADOS DO CATÁLOGO".
+- Se não houver dado no catálogo, diga que vai verificar e chame a tool — não chute.
+- Preço deve ser exatamente o campo "price" do produto (em reais).
+
 Se a cliente demonstrar objeção de preço ou hesitar ("tá caro", "depois", "vou pensar", "não sei"), chame list_active_coupons e/ou validate_coupon; se não houver cupom, diga com honestidade.
 Off-topic (notícias, política, código, outros assuntos): recuse em uma frase e ofereça falar com a vendedora no WhatsApp (tool build_whatsapp_handoff).
 Tom: acolhedor, direto, sem pressão agressiva. Respostas curtas em português do Brasil.
@@ -353,11 +372,17 @@ Quando pedir humana / WhatsApp: use build_whatsapp_handoff.
 Nunca peça CPF, cartão ou dados sensíveis no chat. Não finalize PIX aqui.`;
 }
 
+export type ChatIntent =
+  | { kind: "offtopic" }
+  | { kind: "hesitate" }
+  | { kind: "human" }
+  | { kind: "search"; query: string }
+  | { kind: "price"; query?: string }
+  | { kind: "list" }
+  | { kind: "other" };
+
 /** Heurística se o modelo free ignorar tools. */
-export function detectChatIntent(text: string): {
-  kind: "offtopic" | "hesitate" | "human" | "search" | "other";
-  query?: string;
-} {
+export function detectChatIntent(text: string): ChatIntent {
   const t = text
     .toLowerCase()
     .normalize("NFD")
@@ -384,15 +409,85 @@ export function detectChatIntent(text: string): {
   ) {
     return { kind: "hesitate" };
   }
+  if (
+    /\b(preco|preço|valor|custa|quanto (custa|e|é|fica)|qnto)\b/.test(t) ||
+    /\b(qual o valor|qual o preco|qual o preço)\b/.test(t)
+  ) {
+    return { kind: "price" };
+  }
+  if (
+    /\b(quais pecas|quais peças|o que tem|pecas disponiveis|peças disponíveis|catalogo|catálogo|tem disponivel|tem disponível)\b/.test(
+      t
+    )
+  ) {
+    return { kind: "list" };
+  }
   const fashion =
     t.match(
-      /\b(vestido|blusa|saia|calca|calça|short|conjunto|cropped|body|macacao|macacão|jaqueta|casaco|regata|top|lingerie|calcinha|sutiã|sutia)\b/
+      /\b(vestido|blusa|saia|calca|calça|short|conjunto|cropped|body|macacao|macacão|jaqueta|casaco|regata|top|lingerie|calcinha|sutiã|sutia|camiseta|t-?shirt|urso)\b/
     ) || t.match(/(tem |quero |procuro |mostra |mostrar )(.{2,40})/);
   if (fashion) {
     return {
       kind: "search",
-      query: fashion[0].replace(/^(tem |quero |procuro |mostra |mostrar )/i, "").trim() || fashion[0],
+      query:
+        fashion[0]
+          .replace(/^(tem |quero |procuro |mostra |mostrar )/i, "")
+          .trim() || fashion[0],
     };
   }
   return { kind: "other" };
+}
+
+/** Tenta achar nome de peça no histórico (ex.: "t-shirt de urso"). */
+export function extractProductHintFromHistory(
+  messages: Array<{ role: string; content: string }>
+): string | null {
+  const blob = messages
+    .map((m) => m.content)
+    .join(" \n ")
+    .toLowerCase();
+  const patterns = [
+    /t-?shirt[^.\n?]{0,40}/i,
+    /camiseta[^.\n?]{0,40}/i,
+    /vestido[^.\n?]{0,40}/i,
+    /blusa[^.\n?]{0,40}/i,
+    /conjunto[^.\n?]{0,40}/i,
+    /saia[^.\n?]{0,40}/i,
+  ];
+  for (const re of patterns) {
+    const m = blob.match(re);
+    if (m?.[0]) return m[0].replace(/[?.!,]/g, "").trim().slice(0, 60);
+  }
+  return null;
+}
+
+export function formatMoneyBr(value: number): string {
+  return `R$ ${Number(value).toFixed(2).replace(".", ",")}`;
+}
+
+/** Resposta factual de preço/estoque — não passa pela criatividade da LLM. */
+export function buildFactualProductReply(
+  products: ChatProductCard[],
+  mode: "price" | "list" | "search"
+): string {
+  if (!products.length) {
+    return "Não encontrei essa peça no catálogo agora. Quer buscar por outro nome?";
+  }
+
+  if (mode === "price" || products.length === 1) {
+    const p = products[0];
+    const avail = (p.sizes || []).filter((s) => s.stock > 0);
+    const price = formatMoneyBr(p.price);
+    if (!avail.length) {
+      return `${p.name} custa ${price}, mas está esgotada no momento. Quer que eu procure outra peça?`;
+    }
+    const sizes = avail.map((s) => s.size).join(", ");
+    return `${p.name} custa ${price}. Tamanhos disponíveis: ${sizes}. Quer adicionar ao carrinho?`;
+  }
+
+  const lines = products.slice(0, 5).map((p) => {
+    const avail = (p.sizes || []).some((s) => s.stock > 0);
+    return `• ${p.name} — ${formatMoneyBr(p.price)}${avail ? "" : " (esgotada)"}`;
+  });
+  return `Estas são opções do nosso catálogo:\n${lines.join("\n")}\nQuer o detalhe de alguma?`;
 }

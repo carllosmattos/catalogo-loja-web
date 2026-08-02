@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import {
   CHAT_TOOLS,
+  buildFactualProductReply,
   buildSystemPrompt,
   detectChatIntent,
+  extractProductHintFromHistory,
   runChatTool,
   toolBuildWhatsappHandoff,
   toolListActiveCoupons,
+  toolListRecentProducts,
   toolSearchProducts,
   type ChatCartAction,
   type ChatProductCard,
@@ -122,20 +125,60 @@ export async function POST(request: Request) {
       const listed = await toolListActiveCoupons();
       if (listed.has_coupons && listed.coupons[0]) {
         const code = listed.coupons[0].code;
-        const { validation } = await runChatTool(
+        const { validation } = (await runChatTool(
           "validate_coupon",
           JSON.stringify({ code }),
           customerId
-        ) as { validation: CouponValidation };
+        )) as { validation: CouponValidation };
         if (validation.ok) {
           coupon = { code, validation };
         }
       }
     }
 
+    // Sempre consulta o catálogo (não confia na LLM para preço/estoque)
+    const historyHint = extractProductHintFromHistory(cleaned);
     if (intent.kind === "search" && intent.query) {
       const found = await toolSearchProducts(intent.query, 6);
       products.push(...found.products);
+    } else if (intent.kind === "list") {
+      const listed = await toolListRecentProducts(8);
+      products.push(...listed.products);
+    } else if (intent.kind === "price") {
+      const q = historyHint || intent.query;
+      if (q) {
+        const found = await toolSearchProducts(q, 4);
+        products.push(...found.products);
+      }
+    } else if (historyHint && /\b(dela|dele|dessa|desse|essa|esse|aquela)\b/i.test(lastUser?.content || "")) {
+      const found = await toolSearchProducts(historyHint, 4);
+      products.push(...found.products);
+    }
+
+    // Resposta factual para preço / lista / busca com dados do banco
+    if (
+      products.length &&
+      (intent.kind === "price" ||
+        intent.kind === "list" ||
+        intent.kind === "search" ||
+        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUser?.content || ""))
+    ) {
+      const mode =
+        intent.kind === "price" ||
+        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUser?.content || "")
+          ? "price"
+          : intent.kind === "list"
+            ? "list"
+            : "search";
+      const factual = buildFactualProductReply(dedupeProducts(products), mode);
+      return NextResponse.json({
+        reply: factual,
+        products: dedupeProducts(products).slice(0, 8),
+        cart_actions: [],
+        coupon,
+        handoff_whatsapp: false,
+        whatsapp_url: null,
+      });
     }
 
     const messages: ChatMessage[] = [
@@ -149,7 +192,7 @@ export async function POST(request: Request) {
     if (products.length) {
       messages.push({
         role: "system",
-        content: `Resultados de busca já obtidos (use estes dados, não invente):\n${JSON.stringify(products)}`,
+        content: `DADOS DO CATÁLOGO (obrigatório — use só estes preços/estoques):\n${JSON.stringify(dedupeProducts(products))}`,
       });
     }
     if (coupon) {
