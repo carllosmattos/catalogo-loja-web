@@ -57,6 +57,7 @@ src/app/admin/      # Painel admin
 src/app/api/        # Checkout PIX, frete, pagamentos
 src/lib/            # Lógica de negócio
 src/components/     # UI components
+supabase/           # Migrations SQL + Edge Functions
 ```
 
 ## Admin
@@ -65,4 +66,4 @@ Acesse `/admin/login` com usuário Supabase Auth.
 
 ## Banco de dados
 
-Usa o Supabase do projeto `catalogo` (migrations em `catalogo/supabase/` no monorepo local).
+Migrations e Edge Functions ficam em [`supabase/`](supabase/) neste repositório (fonte de verdade). Aplique SQL novos no Supabase SQL Editor na ordem numérica; detalhes em [`supabase/README.md`](supabase/README.md).

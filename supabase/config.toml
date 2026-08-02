@@ -1,0 +1,5 @@
+# Projeto Supabase (ref da URL: ktvlhviikifcxbibxsas.supabase.co)
+project_id = "ktvlhviikifcxbibxsas"
+
+[functions.mercadopago-webhook]
+verify_jwt = false
