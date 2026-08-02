@@ -4,6 +4,7 @@ import {
   getPayment,
   mapMpStatus,
 } from "@/lib/payments";
+import { sendPaidEmailIfNeeded } from "@/lib/email";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(
@@ -92,6 +93,11 @@ export async function POST(
         { error: rpcError.message || "Erro ao aplicar status no banco" },
         { status: 500 }
       );
+    }
+
+    if (status === "approved") {
+      // Fire-and-forget: nunca falhar o sync por causa do e-mail
+      void sendPaidEmailIfNeeded(orderId);
     }
 
     return NextResponse.json({

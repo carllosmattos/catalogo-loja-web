@@ -40,6 +40,9 @@ Este projeto fica na **raiz do repositório** — não precisa configurar Root D
 | `MERCADOPAGO_WEBHOOK_URL` | URL da Edge Function webhook |
 | `APP_BASE_URL` | URL de produção (ex: https://sua-loja.vercel.app) |
 | `PAYMENTS_ENABLED` | `true` |
+| `RESEND_API_KEY` | E-mail de pagamento aprovado (Resend) |
+| `EMAIL_FROM` | Remetente (teste: `LM Moda <onboarding@resend.dev>`) |
+| `EMAIL_TEST_TO` | Opcional — força destino no teste com onboarding@ |
 | `MELHOR_ENVIO_TOKEN` | Opcional — cotação de frete |
 
 6. Após deploy, atualize `APP_BASE_URL` com a URL real
