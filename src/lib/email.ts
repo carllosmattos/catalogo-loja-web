@@ -145,10 +145,12 @@ export async function sendPaidEmailIfNeeded(orderId: string): Promise<void> {
     const accent =
       (typeof settings?.accent_color === "string" && settings.accent_color) ||
       BRAND.accent;
-    const logoUrl =
+    const logoFromSettings =
       typeof settings?.logo_url === "string" && settings.logo_url.trim()
         ? settings.logo_url.trim()
-        : null;
+        : "";
+    const base = appBaseUrl();
+    const logoUrl = absoluteAssetUrl(logoFromSettings || "/logo-lm.png", base);
     const whatsapp =
       typeof settings?.whatsapp_number === "string" &&
       settings.whatsapp_number.trim()
@@ -217,8 +219,10 @@ export function buildPaidEmailHtml(p: PaidEmailPayload): string {
   const firstName = p.customerName.split(/\s+/)[0] || p.customerName;
 
   const logoBlock = p.logoUrl
-    ? `<img src="${escapeHtml(p.logoUrl)}" alt="${escapeHtml(p.storeName)}" width="72" height="72" style="display:block;margin:0 auto 12px;border-radius:50%;border:2px solid ${secondary};object-fit:cover;" />`
-    : `<div style="width:56px;height:56px;margin:0 auto 12px;border-radius:50%;background:${secondary};line-height:56px;text-align:center;font-size:22px;font-weight:700;color:${primary};">LM</div>`;
+    ? `<img src="${escapeHtml(p.logoUrl)}" alt="${escapeHtml(p.storeName)}" width="88" height="88" style="display:block;margin:0 auto 14px;border-radius:50%;border:3px solid ${secondary};background:${BRAND.white};object-fit:cover;" />`
+    : "";
+
+  const statusGreen = "#15803d";
 
   const itemRows =
     p.items.length > 0
@@ -289,7 +293,7 @@ export function buildPaidEmailHtml(p: PaidEmailPayload): string {
               <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:22px;letter-spacing:0.04em;color:${BRAND.white};font-weight:700;">
                 ${escapeHtml(p.storeName)}
               </p>
-              <p style="margin:8px 0 0;font-family:system-ui,-apple-system,sans-serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:${secondary};">
+              <p style="margin:8px 0 0;font-family:system-ui,-apple-system,sans-serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:${statusGreen};font-weight:700;">
                 Pagamento confirmado
               </p>
             </td>
@@ -379,6 +383,14 @@ export function buildPaidEmailHtml(p: PaidEmailPayload): string {
   </table>
 </body>
 </html>`;
+}
+
+function absoluteAssetUrl(pathOrUrl: string, base: string): string {
+  const raw = pathOrUrl.trim();
+  if (!raw) return `${base}/logo-lm.png`;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("//")) return `https:${raw}`;
+  return `${base}${raw.startsWith("/") ? raw : `/${raw}`}`;
 }
 
 function escapeHtml(value: string): string {
