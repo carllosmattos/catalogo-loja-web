@@ -3,11 +3,15 @@ import {
   CHAT_TOOLS,
   buildFactualProductReply,
   buildSystemPrompt,
+  buildWhatsappContextSummary,
+  countHesitations,
   detectChatIntent,
   extractProductHintFromHistory,
   runChatTool,
+  sanitizeAssistantReply,
   toolBuildWhatsappHandoff,
-  toolListActiveCoupons,
+  toolGetStoreInfo,
+  toolListApplicableCoupons,
   toolListRecentProducts,
   toolSearchProducts,
   type ChatCartAction,
@@ -48,8 +52,11 @@ export async function POST(request: Request) {
           reply:
             "O chat está temporariamente indisponível. Fale conosco no WhatsApp.",
           handoff_whatsapp: true,
-          whatsapp_url: (await toolBuildWhatsappHandoff("Chat indisponível"))
-            .whatsapp_url,
+          whatsapp_url: (
+            await toolBuildWhatsappHandoff(
+              "Chat indisponível — cliente pediu atendimento."
+            )
+          ).whatsapp_url,
         },
         { status: 503 }
       );
@@ -61,7 +68,7 @@ export async function POST(request: Request) {
       "anon";
     if (!rateLimit(ip)) {
       const handoff = await toolBuildWhatsappHandoff(
-        "Limite de mensagens no chat"
+        "Limite de mensagens no chat do site."
       );
       return NextResponse.json({
         reply:
@@ -97,6 +104,9 @@ export async function POST(request: Request) {
     const settings = await fetchStoreSettings();
     const lastUser = [...cleaned].reverse().find((m) => m.role === "user");
     const intent = detectChatIntent(lastUser?.content || "");
+    const historyHint = extractProductHintFromHistory(cleaned);
+    const waSummary = () =>
+      buildWhatsappContextSummary(cleaned, { productHint: historyHint });
 
     const products: ChatProductCard[] = [];
     const cartActions: ChatCartAction[] = [];
@@ -104,40 +114,49 @@ export async function POST(request: Request) {
     let handoffWhatsapp = false;
     let whatsappUrl: string | null = null;
 
-    // Atalhos determinísticos (modelos free inconsistentes)
     if (intent.kind === "offtopic" || intent.kind === "human") {
-      const handoff = await toolBuildWhatsappHandoff(
-        intent.kind === "offtopic"
-          ? "Assunto fora do escopo da loja"
-          : lastUser?.content || "Atendimento humano"
-      );
+      const handoff = await toolBuildWhatsappHandoff(waSummary());
       return NextResponse.json({
-        reply:
+        reply: sanitizeAssistantReply(
           intent.kind === "offtopic"
             ? "Consigo ajudar só com as peças e pedidos da loja 😊 Quer falar com a nossa equipe no WhatsApp?"
-            : "Claro! Te conecto com a nossa equipe no WhatsApp.",
+            : "Claro! Te conecto com a nossa equipe no WhatsApp."
+        ),
         handoff_whatsapp: true,
         whatsapp_url: handoff.whatsapp_url,
       });
     }
 
-    if (intent.kind === "hesitate") {
-      const listed = await toolListActiveCoupons();
+    if (intent.kind === "about_store") {
+      const info = await toolGetStoreInfo();
+      return NextResponse.json({
+        reply: sanitizeAssistantReply(
+          `${info.about} Quer que eu te ajude a achar uma peça?`
+        ),
+        products: [],
+        cart_actions: [],
+        coupon: null,
+        handoff_whatsapp: false,
+        whatsapp_url: null,
+      });
+    }
+
+    // Cupom só se pedir explicitamente OU insistir no preço (2+ hesitações)
+    const hesitations = countHesitations(cleaned);
+    const mayOfferCoupon =
+      intent.kind === "ask_coupon" ||
+      (intent.kind === "hesitate" && hesitations >= 2);
+
+    if (mayOfferCoupon) {
+      const listed = await toolListApplicableCoupons(customerId);
       if (listed.has_coupons && listed.coupons[0]) {
-        const code = listed.coupons[0].code;
-        const { validation } = (await runChatTool(
-          "validate_coupon",
-          JSON.stringify({ code }),
-          customerId
-        )) as { validation: CouponValidation };
-        if (validation.ok) {
-          coupon = { code, validation };
-        }
+        coupon = {
+          code: listed.coupons[0].code,
+          validation: listed.coupons[0].validation,
+        };
       }
     }
 
-    // Sempre consulta o catálogo (não confia na LLM para preço/estoque)
-    const historyHint = extractProductHintFromHistory(cleaned);
     if (intent.kind === "search" && intent.query) {
       const found = await toolSearchProducts(intent.query, 6);
       products.push(...found.products);
@@ -150,12 +169,16 @@ export async function POST(request: Request) {
         const found = await toolSearchProducts(q, 4);
         products.push(...found.products);
       }
-    } else if (historyHint && /\b(dela|dele|dessa|desse|essa|esse|aquela)\b/i.test(lastUser?.content || "")) {
+    } else if (
+      historyHint &&
+      /\b(dela|dele|dessa|desse|essa|esse|aquela)\b/i.test(
+        lastUser?.content || ""
+      )
+    ) {
       const found = await toolSearchProducts(historyHint, 4);
       products.push(...found.products);
     }
 
-    // Resposta factual para preço / lista / busca com dados do banco
     if (
       products.length &&
       (intent.kind === "price" ||
@@ -172,10 +195,28 @@ export async function POST(request: Request) {
             : "search";
       const factual = buildFactualProductReply(dedupeProducts(products), mode);
       return NextResponse.json({
-        reply: factual,
+        reply: sanitizeAssistantReply(factual),
         products: dedupeProducts(products).slice(0, 8),
         cart_actions: [],
-        coupon,
+        coupon: null,
+        handoff_whatsapp: false,
+        whatsapp_url: null,
+      });
+    }
+
+    // Primeira hesitação: força negociação sem cupom
+    if (intent.kind === "hesitate" && hesitations < 2) {
+      return NextResponse.json({
+        reply: sanitizeAssistantReply(
+          [
+            "Entendo perfeitamente — o investimento importa.",
+            "Me conta o que mais pesou pra você: o valor em si, o caimento, ou estava comparando com outra peça?",
+            "As nossas peças priorizam caimento e acabamento pra vestir bem no dia a dia. Se quiser, te ajudo a achar uma opção no seu estilo e orçamento.",
+          ].join(" ")
+        ),
+        products: dedupeProducts(products).slice(0, 8),
+        cart_actions: [],
+        coupon: null,
         handoff_whatsapp: false,
         whatsapp_url: null,
       });
@@ -198,7 +239,13 @@ export async function POST(request: Request) {
     if (coupon) {
       messages.push({
         role: "system",
-        content: `Cupom disponível para oferecer: ${JSON.stringify(coupon)}`,
+        content: `Pode oferecer NO MÁXIMO este cupom (já validado para a cliente): ${JSON.stringify(coupon)}. Não liste outros.`,
+      });
+    } else if (intent.kind === "ask_coupon") {
+      messages.push({
+        role: "system",
+        content:
+          "Não há cupom aplicável agora para esta cliente. Seja honesta e ofereça ajuda por qualidade/outra peça ou WhatsApp.",
       });
     }
 
@@ -221,7 +268,7 @@ export async function POST(request: Request) {
 
           for (const call of result.tool_calls) {
             const toolName = call.function?.name || "";
-            const toolResult = await runChatTool(
+            let toolResult = await runChatTool(
               toolName,
               call.function?.arguments || "{}",
               customerId
@@ -241,7 +288,7 @@ export async function POST(request: Request) {
             }
             if (toolName === "validate_coupon") {
               const r = toolResult as { validation: CouponValidation };
-              if (r.validation?.ok && r.validation.code) {
+              if (r.validation?.ok && r.validation.code && mayOfferCoupon) {
                 coupon = {
                   code: String(r.validation.code),
                   validation: r.validation,
@@ -249,26 +296,32 @@ export async function POST(request: Request) {
               }
             }
             if (toolName === "list_active_coupons") {
-              const r = toolResult as {
-                coupons?: Array<{ code: string }>;
-                has_coupons?: boolean;
-              };
-              if (r.has_coupons && r.coupons?.[0]?.code && !coupon) {
-                const code = r.coupons[0].code;
-                const validated = (await runChatTool(
-                  "validate_coupon",
-                  JSON.stringify({ code }),
-                  customerId
-                )) as { validation: CouponValidation };
-                if (validated.validation?.ok) {
-                  coupon = { code, validation: validated.validation };
+              if (!mayOfferCoupon) {
+                toolResult = {
+                  coupons: [],
+                  has_coupons: false,
+                  note: "Ainda não ofereça cupom — continue negociando (qualidade/motivo).",
+                };
+              } else {
+                const r = toolResult as {
+                  coupons?: Array<{
+                    code: string;
+                    validation: CouponValidation;
+                  }>;
+                  has_coupons?: boolean;
+                };
+                if (r.has_coupons && r.coupons?.[0]?.code && !coupon) {
+                  coupon = {
+                    code: r.coupons[0].code,
+                    validation: r.coupons[0].validation,
+                  };
                 }
               }
             }
             if (toolName === "build_whatsapp_handoff") {
+              toolResult = await toolBuildWhatsappHandoff(waSummary());
               const r = toolResult as {
                 whatsapp_url?: string | null;
-                ok?: boolean;
               };
               if (r.whatsapp_url) {
                 handoffWhatsapp = true;
@@ -286,17 +339,16 @@ export async function POST(request: Request) {
           continue;
         }
 
-        reply = (result.content || "").trim();
+        reply = sanitizeAssistantReply(result.content || "");
         break;
       }
     } catch (e) {
       console.error("[chat] llm", e);
-      const handoff = await toolBuildWhatsappHandoff(
-        "Falha no assistente virtual"
-      );
+      const handoff = await toolBuildWhatsappHandoff(waSummary());
       return NextResponse.json({
-        reply:
-          "Estou com instabilidade agora. Posso te passar para o WhatsApp da loja?",
+        reply: sanitizeAssistantReply(
+          "Estou com instabilidade agora. Posso te passar para o WhatsApp da loja?"
+        ),
         handoff_whatsapp: true,
         whatsapp_url: handoff.whatsapp_url,
         products: dedupeProducts(products),
@@ -311,18 +363,18 @@ export async function POST(request: Request) {
           "Encontrei estas opções. Quer que eu detalhe alguma ou adicione no carrinho (me diga o tamanho)?";
       } else if (coupon) {
         reply = `Tenho um cupom que pode ajudar: ${coupon.code}. Posso aplicar no carrinho se quiser.`;
-      } else if (intent.kind === "hesitate") {
+      } else if (intent.kind === "ask_coupon" || mayOfferCoupon) {
         reply =
-          "Entendo! No momento não tenho cupom ativo, mas posso te ajudar a escolher outra peça ou falar no WhatsApp.";
+          "No momento não tenho cupom aplicável pra você, mas posso te ajudar a escolher outra peça ou falar no WhatsApp.";
       } else {
         reply =
-          "Posso te ajudar a achar uma peça, ver tamanhos/estoque ou aplicar cupom. O que você procura?";
+          "Posso te ajudar a achar uma peça, ver tamanhos/estoque ou tirar dúvidas da loja. O que você procura?";
       }
+      reply = sanitizeAssistantReply(reply);
     }
 
-    // Parse soft markers from model text
     if (/whatsapp|atendente/i.test(reply) && !whatsappUrl) {
-      const handoff = await toolBuildWhatsappHandoff(lastUser?.content || "");
+      const handoff = await toolBuildWhatsappHandoff(waSummary());
       handoffWhatsapp = true;
       whatsappUrl = handoff.whatsapp_url;
     }
@@ -331,7 +383,7 @@ export async function POST(request: Request) {
       reply,
       products: dedupeProducts(products).slice(0, 8),
       cart_actions: cartActions,
-      coupon,
+      coupon: mayOfferCoupon ? coupon : null,
       handoff_whatsapp: handoffWhatsapp,
       whatsapp_url: whatsappUrl,
       go_checkout: /pagamento|checkout|carrinho|finalizar/i.test(reply),

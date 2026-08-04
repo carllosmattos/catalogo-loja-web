@@ -35,16 +35,32 @@ function productImage(p: Product): string | null {
 async function toCard(product: Product): Promise<ChatProductCard> {
   const promotions = await fetchActivePromotions();
   const profit = calculateProfit(product, [], promotions);
+  const sizes = (product.sizes || [])
+    .map((s) => ({
+      size: s.size,
+      stock: Number(s.stock) || 0,
+    }))
+    .filter((s) => s.stock > 0);
   return {
     id: product.id,
     name: product.name,
     image_url: productImage(product),
     price: Math.round((profit.preco_catalogo - profit.desconto) * 100) / 100,
-    sizes: (product.sizes || []).map((s) => ({
-      size: s.size,
-      stock: Number(s.stock) || 0,
-    })),
+    sizes,
   };
+}
+
+/** Só peças com algum tamanho em estoque. */
+export function onlyInStock(cards: ChatProductCard[]): ChatProductCard[] {
+  return cards.filter((p) => (p.sizes || []).some((s) => s.stock > 0));
+}
+
+export function sanitizeAssistantReply(text: string): string {
+  return String(text || "")
+    .replace(/<\/?channel[^>]*>/gi, "")
+    .replace(/<\|[^|>]+\|>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export async function toolSearchProducts(query: string, limit = 6) {
@@ -74,15 +90,15 @@ export async function toolSearchProducts(query: string, limit = 6) {
       .order("created_at", { ascending: false })
       .limit(6);
     const withSizes = await attachSizesLocal(fallback || []);
-    const cards = await Promise.all(withSizes.map(toCard));
+    const cards = onlyInStock(await Promise.all(withSizes.map(toCard)));
     return {
       products: cards,
-      note: `Nada encontrado para "${q}". Seguem destaques recentes.`,
+      note: `Nada encontrado para "${q}". Seguem peças com estoque.`,
     };
   }
 
   const withSizes = await attachSizesLocal(data || []);
-  const cards = await Promise.all(withSizes.map(toCard));
+  const cards = onlyInStock(await Promise.all(withSizes.map(toCard)));
   return { products: cards, note: null as string | null };
 }
 
@@ -95,7 +111,7 @@ export async function toolListRecentProducts(limit = 8) {
     .order("created_at", { ascending: false })
     .limit(Math.min(12, Math.max(1, limit)));
   const withSizes = await attachSizesLocal(data || []);
-  const cards = await Promise.all(withSizes.map(toCard));
+  const cards = onlyInStock(await Promise.all(withSizes.map(toCard)));
   return { products: cards, note: null as string | null };
 }
 
@@ -103,6 +119,14 @@ export async function toolGetProduct(productId: string) {
   const product = await fetchProduct(productId);
   if (!product) return { error: "Produto não encontrado", product: null };
   const card = await toCard(product);
+  if (!card.sizes.length) {
+    return {
+      error: "Produto sem estoque no momento",
+      product: null,
+      unavailable: true,
+      name: product.name,
+    };
+  }
   const promotions = await fetchActivePromotions();
   const profit = calculateProfit(product, [], promotions);
   return {
@@ -117,27 +141,62 @@ export async function toolGetProduct(productId: string) {
   };
 }
 
-export async function toolListActiveCoupons() {
+/** Cupons ativos E aplicáveis à cliente (validate_coupon ok). */
+export async function toolListApplicableCoupons(
+  customerId: string | null | undefined,
+  subtotal = 100,
+  shipping = 20
+) {
   const supabase = await createServiceClient();
   const { data } = await supabase
     .from("coupons")
-    .select("code, title, discount_type, discount_value, discount_target, max_uses, used_count, active")
+    .select(
+      "code, title, discount_type, discount_value, discount_target, max_uses, used_count, active"
+    )
     .eq("active", true)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(15);
 
-  const coupons = (data || [])
-    .filter((c) => Number(c.used_count) < Number(c.max_uses))
-    .map((c) => ({
+  const candidates = (data || []).filter(
+    (c) => Number(c.used_count) < Number(c.max_uses)
+  );
+
+  const applicable: Array<{
+    code: string;
+    title: string;
+    discount_type: string;
+    discount_value: number;
+    discount_target: string;
+    validation: CouponValidation;
+  }> = [];
+
+  for (const c of candidates) {
+    const validation = await validateCouponServer(
+      String(c.code),
+      customerId,
+      subtotal,
+      shipping
+    );
+    if (!validation.ok) continue;
+    applicable.push({
       code: String(c.code),
       title: String(c.title || ""),
-      discount_type: c.discount_type,
+      discount_type: String(c.discount_type),
       discount_value: Number(c.discount_value),
-      discount_target: c.discount_target || "product",
-      remaining: Math.max(0, Number(c.max_uses) - Number(c.used_count)),
-    }));
+      discount_target: String(c.discount_target || "product"),
+      validation,
+    });
+    if (applicable.length >= 3) break;
+  }
 
-  return { coupons, has_coupons: coupons.length > 0 };
+  return {
+    coupons: applicable,
+    has_coupons: applicable.length > 0,
+  };
+}
+
+export async function toolListActiveCoupons(customerId?: string | null) {
+  return toolListApplicableCoupons(customerId);
 }
 
 export async function toolValidateCoupon(
@@ -155,10 +214,34 @@ export async function toolValidateCoupon(
   return { validation };
 }
 
+export function buildWhatsappContextSummary(
+  messages: Array<{ role: string; content: string }>,
+  extras?: { productHint?: string | null }
+): string {
+  const recent = messages.slice(-8);
+  const lines: string[] = [
+    "Resumo do atendimento no chat do site:",
+  ];
+  if (extras?.productHint) {
+    lines.push(`Peça mencionada: ${extras.productHint}`);
+  }
+  for (const m of recent) {
+    const who = m.role === "user" ? "Cliente" : "Consultora";
+    const text = String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    if (text) lines.push(`- ${who}: ${text}`);
+  }
+  lines.push("", "Pode continuar o atendimento por aqui?");
+  return lines.join("\n");
+}
+
 export async function toolBuildWhatsappHandoff(summary: string) {
   const settings = await fetchStoreSettings();
   if (!settings.whatsapp_number) {
-    return { ok: false, whatsapp_url: null as string | null, error: "WhatsApp não configurado" };
+    return {
+      ok: false,
+      whatsapp_url: null as string | null,
+      error: "WhatsApp não configurado",
+    };
   }
   const msg = [
     `Olá! Vim pelo chat da ${settings.store_name}.`,
@@ -259,7 +342,16 @@ export const CHAT_TOOLS = [
     function: {
       name: "list_active_coupons",
       description:
-        "Lista cupons ativos da loja. Use quando a cliente hesitar por preço ou pedir desconto.",
+        "Lista cupons que a cliente PODE usar agora (já validados). Use só depois de negociar (qualidade/motivo) ou se ela pedir cupom/desconto explicitamente. Nunca despeje vários cupons de uma vez — ofereça no máximo um.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_store_info",
+      description:
+        "Informações sobre a loja LM (proposta, atendimento, frete em termos gerais).",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -300,11 +392,15 @@ export const CHAT_TOOLS = [
     function: {
       name: "build_whatsapp_handoff",
       description:
-        "Gera link do WhatsApp para atendimento humano (off-topic, pedido de pessoa ou falha).",
+        "Gera link do WhatsApp com resumo do atendimento (não só a última frase). Use em off-topic, pedido de humana ou quando a cliente pedir WhatsApp.",
       parameters: {
         type: "object",
         properties: {
-          summary: { type: "string", description: "Resumo curto do que a cliente precisa" },
+          summary: {
+            type: "string",
+            description:
+              "Contexto: peça citada, dúvida e o que já foi conversado",
+          },
         },
         required: ["summary"],
       },
@@ -333,7 +429,9 @@ export async function runChatTool(
     case "get_product":
       return toolGetProduct(String(args.product_id || ""));
     case "list_active_coupons":
-      return toolListActiveCoupons();
+      return toolListApplicableCoupons(customerId);
+    case "get_store_info":
+      return toolGetStoreInfo();
     case "validate_coupon":
       return toolValidateCoupon(
         String(args.code || ""),
@@ -354,31 +452,56 @@ export async function runChatTool(
   }
 }
 
+export async function toolGetStoreInfo() {
+  const settings = await fetchStoreSettings();
+  return {
+    store_name: settings.store_name,
+    about: [
+      `${settings.store_name} é uma loja de moda feminina online.`,
+      "Propõe peças com estilo, atendimento próximo e compra fácil pelo site (PIX) ou WhatsApp.",
+      "Ajuda a escolher tamanho, combinar looks, informar estoque real e acompanhar pedidos.",
+      "Frete conforme região (transportadora/Correios) ou Uber combinado com a loja.",
+      "Trocas e devoluções seguem a política publicada no site.",
+    ].join(" "),
+    whatsapp_configured: Boolean(settings.whatsapp_number),
+  };
+}
+
 export function buildSystemPrompt(storeName: string): string {
-  return `Você é a consultora de vendas da loja de moda feminina "${storeName}".
-Só fala de: peças, tamanhos, estoque, preços, promoções, frete em termos gerais, cupons e pedidos desta loja.
+  return `Você é a consultora de vendas da "${storeName}", loja de moda feminina online.
+Proposta da loja: peças femininas com carinho, atendimento humanizado, compra pelo site (PIX) e suporte no WhatsApp. Você ajuda a descobrir o estilo da cliente, sugerir tamanho e tirar dúvidas de estoque/pedido.
+
+Escopo: só peças, tamanhos, estoque, preços, frete em geral, cupons/promoções válidos e pedidos desta loja.
+Sobre a loja: use get_store_info se perguntarem o que a loja é / o que oferece.
 
 REGRA CRÍTICA DE DADOS:
 - Nunca invente preço, estoque, tamanho ou cupom.
-- Só use números e nomes que aparecerem nos resultados das tools ou no bloco "DADOS DO CATÁLOGO".
-- Se não houver dado no catálogo, diga que vai verificar e chame a tool — não chute.
-- Preço deve ser exatamente o campo "price" do produto (em reais).
+- Só use dados das tools / "DADOS DO CATÁLOGO".
+- Peça só é disponível se houver tamanho com stock > 0. Cadastro ativo sem estoque = indisponível.
+- Cupom/promoção: só mencione se a tool confirmou que é aplicável àquela cliente. Não cite cupons usados, esgotados ou inválidos.
+- Preço = campo "price" (reais).
 
-Se a cliente demonstrar objeção de preço ou hesitar ("tá caro", "depois", "vou pensar", "não sei"), chame list_active_coupons e/ou validate_coupon; se não houver cupom, diga com honestidade.
-Off-topic (notícias, política, código, outros assuntos): recuse em uma frase e ofereça falar com a vendedora no WhatsApp (tool build_whatsapp_handoff).
-Tom: acolhedor, direto, sem pressão agressiva. Respostas curtas em português do Brasil.
-Quando a cliente quiser comprar: confirme peça+tamanho e use add_to_cart; diga que pode ir ao pagamento no site.
-Quando pedir humana / WhatsApp: use build_whatsapp_handoff.
-Nunca peça CPF, cartão ou dados sensíveis no chat. Não finalize PIX aqui.`;
+NEGOCIAÇÃO (objeção de preço / "tá caro"):
+1) Na primeira hesitação: empatia + pergunte o motivo + fale de qualidade/caimento/tecido/como vestir. NÃO ofereça cupom ainda.
+2) Só ofereça cupom se ela insistir no preço OU pedir desconto/cupom explicitamente. Ofereça NO MÁXIMO UM cupom já validado (list_active_coupons).
+3) Nunca despeje a lista inteira de cupons.
+
+Off-topic: recuse em uma frase e ofereça WhatsApp (build_whatsapp_handoff com resumo do contexto).
+Tom: acolhedora, segura, sem pressão. Respostas curtas em pt-BR.
+Compra: peça+tamanho → add_to_cart → convidar ao pagamento no site.
+Não peça CPF/cartão no chat. Não finalize PIX aqui.
+Nunca escreva tags técnicas (ex.: channel).`;
 }
 
 export type ChatIntent =
   | { kind: "offtopic" }
   | { kind: "hesitate" }
+  | { kind: "ask_coupon" }
   | { kind: "human" }
   | { kind: "search"; query: string }
   | { kind: "price"; query?: string }
   | { kind: "list" }
+  | { kind: "about_store" }
   | { kind: "other" };
 
 /** Heurística se o modelo free ignorar tools. */
@@ -403,10 +526,16 @@ export function detectChatIntent(text: string): ChatIntent {
     return { kind: "offtopic" };
   }
   if (
-    /\b(caro|desisto|depois|vou pensar|nao sei|não sei|desconto|cupom|promocao|promoção)\b/.test(
+    /\b(sobre a loja|quem sao voces|quem são vocês|o que e a loja|o que é a loja|o que voces fazem|o que vocês fazem|proposta da loja)\b/.test(
       t
     )
   ) {
+    return { kind: "about_store" };
+  }
+  if (/\b(cupom|desconto|promo(c|ç)ao)\b/.test(t)) {
+    return { kind: "ask_coupon" };
+  }
+  if (/\b(caro|desisto|depois|vou pensar|nao sei|não sei)\b/.test(t)) {
     return { kind: "hesitate" };
   }
   if (
@@ -436,6 +565,14 @@ export function detectChatIntent(text: string): ChatIntent {
     };
   }
   return { kind: "other" };
+}
+
+export function countHesitations(
+  messages: Array<{ role: string; content: string }>
+): number {
+  return messages.filter(
+    (m) => m.role === "user" && detectChatIntent(m.content).kind === "hesitate"
+  ).length;
 }
 
 /** Tenta achar nome de peça no histórico (ex.: "t-shirt de urso"). */
@@ -485,9 +622,14 @@ export function buildFactualProductReply(
     return `${p.name} custa ${price}. Tamanhos disponíveis: ${sizes}. Quer adicionar ao carrinho?`;
   }
 
-  const lines = products.slice(0, 5).map((p) => {
-    const avail = (p.sizes || []).some((s) => s.stock > 0);
-    return `• ${p.name} — ${formatMoneyBr(p.price)}${avail ? "" : " (esgotada)"}`;
-  });
-  return `Estas são opções do nosso catálogo:\n${lines.join("\n")}\nQuer o detalhe de alguma?`;
+  const inStock = products.filter((p) =>
+    (p.sizes || []).some((s) => s.stock > 0)
+  );
+  if (!inStock.length) {
+    return "No momento não tenho essa peça com estoque. Quer buscar outra opção?";
+  }
+  const lines = inStock
+    .slice(0, 5)
+    .map((p) => `• ${p.name} — ${formatMoneyBr(p.price)}`);
+  return `Estas são opções disponíveis agora:\n${lines.join("\n")}\nQuer o detalhe de alguma?`;
 }

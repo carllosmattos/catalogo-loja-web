@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessageCircle, Send, X } from "lucide-react";
+import { MessageCircle, RotateCcw, Send, X } from "lucide-react";
 import { useCartStore, useCustomerStore } from "@/stores";
 import { formatCurrency, cn } from "@/lib/utils";
 import type { CouponValidation, ProductSize, StoreSettings } from "@/types";
@@ -17,8 +17,64 @@ type ProductCard = {
   sizes: { size: string; stock: number }[];
 };
 
+type StoredChat = {
+  updatedAt: number;
+  messages: Msg[];
+};
+
+const IDLE_MS = 60 * 60 * 1000; // 1h
+
 interface ChatFloatProps {
   settings: StoreSettings;
+}
+
+function welcomeMsg(storeName: string): Msg {
+  return {
+    role: "assistant",
+    content: `Olá! Sou a consultora da ${storeName}. Posso ajudar a achar uma peça, ver tamanhos ou tirar dúvidas da loja 😊`,
+  };
+}
+
+function storageKey(customerId: string | null | undefined) {
+  return customerId ? `lm-chat:${customerId}` : null;
+}
+
+function loadStored(customerId: string | null | undefined): StoredChat | null {
+  const key = storageKey(customerId);
+  if (!key || typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredChat;
+    if (!parsed?.updatedAt || !Array.isArray(parsed.messages)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveStored(customerId: string | null | undefined, messages: Msg[]) {
+  const key = storageKey(customerId);
+  if (!key || typeof window === "undefined") return;
+  const payload: StoredChat = {
+    updatedAt: Date.now(),
+    messages: messages.slice(-40),
+  };
+  try {
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    /* quota */
+  }
+}
+
+function clearStored(customerId: string | null | undefined) {
+  const key = storageKey(customerId);
+  if (!key || typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function ChatFloat({ settings }: ChatFloatProps) {
@@ -29,16 +85,49 @@ export function ChatFloat({ settings }: ChatFloatProps) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "assistant",
-      content: `Olá! Sou a consultora da ${settings.store_name}. Posso ajudar a achar uma peça, ver tamanhos ou cupom 😊`,
-    },
+    welcomeMsg(settings.store_name),
   ]);
   const [products, setProducts] = useState<ProductCard[]>([]);
   const [whatsappUrl, setWhatsappUrl] = useState<string | null>(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const customerId = customer?.id || null;
+
+  const startFresh = useCallback(() => {
+    const next = [welcomeMsg(settings.store_name)];
+    setMessages(next);
+    setProducts([]);
+    setWhatsappUrl(null);
+    setShowCheckout(false);
+    clearStored(customerId);
+    if (customerId) saveStored(customerId, next);
+  }, [customerId, settings.store_name]);
+
+  // Histórico: só quando logada; nova conversa se idle > 1h
+  useEffect(() => {
+    if (!customerId) {
+      setMessages([welcomeMsg(settings.store_name)]);
+      setHydrated(true);
+      return;
+    }
+    const stored = loadStored(customerId);
+    const now = Date.now();
+    if (stored && now - stored.updatedAt <= IDLE_MS && stored.messages.length) {
+      setMessages(stored.messages);
+    } else {
+      const next = [welcomeMsg(settings.store_name)];
+      setMessages(next);
+      saveStored(customerId, next);
+    }
+    setHydrated(true);
+  }, [customerId, settings.store_name]);
+
+  useEffect(() => {
+    if (!hydrated || !customerId) return;
+    saveStored(customerId, messages);
+  }, [messages, customerId, hydrated]);
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -63,7 +152,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
             role: m.role,
             content: m.content,
           })),
-          customerId: customer?.id || null,
+          customerId,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -152,16 +241,29 @@ export function ChatFloat({ settings }: ChatFloatProps) {
           <div className="flex items-center justify-between bg-[var(--color-primary)] px-4 py-3 text-white">
             <div>
               <p className="text-sm font-semibold">Consultora LM</p>
-              <p className="text-[11px] text-white/80">Chat da loja</p>
+              <p className="text-[11px] text-white/80">
+                {customerId ? "Histórico salvo na sua conta" : "Chat da loja"}
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-full p-1.5 hover:bg-white/15"
-              aria-label="Fechar chat"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={startFresh}
+                className="rounded-full p-1.5 hover:bg-white/15"
+                aria-label="Nova conversa"
+                title="Nova conversa"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-full p-1.5 hover:bg-white/15"
+                aria-label="Fechar chat"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto bg-[var(--color-accent)]/40 p-3">
