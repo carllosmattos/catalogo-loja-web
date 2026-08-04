@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   CHAT_TOOLS,
+  buildCartAction,
   buildFactualProductReply,
   buildNegotiationGuide,
   buildSystemPrompt,
@@ -8,7 +9,10 @@ import {
   countHesitations,
   detectChatIntent,
   extractProductHintFromHistory,
+  extractSizeMention,
+  formatAssistantReply,
   getNegotiationStage,
+  recoverCartActionFromClaim,
   runChatTool,
   sanitizeAssistantReply,
   toolBuildWhatsappHandoff,
@@ -288,6 +292,39 @@ export async function POST(request: Request) {
         content: `DADOS DO CATÁLOGO (obrigatório — use só estes preços/estoques):\n${JSON.stringify(dedupeProducts(products))}`,
       });
     }
+
+    // Cliente pediu tamanho → tenta add_to_cart de verdade (não depende da LLM)
+    const sizeAsk = extractSizeMention(lastUserText);
+    const wantsAdd =
+      sizeAsk &&
+      (/\b(adiciona|coloca|quero|pode|manda|carrinho|esse|essa|pega)\b/i.test(
+        lastUserText
+      ) ||
+        /^(tam(anho)?\.?\s*)?(U|P|M|G)$/i.test(lastUserText.trim()));
+    if (wantsAdd && sizeAsk) {
+      let target = products[0] || null;
+      if (!target && historyHint) {
+        const found = await toolSearchProducts(historyHint, 3);
+        target = found.products[0] || null;
+        if (target) products.push(target);
+      }
+      if (target) {
+        const action = await buildCartAction(target.id, sizeAsk, 1);
+        if ("type" in action && action.type === "add") {
+          cartActions.push(action);
+          messages.push({
+            role: "system",
+            content: `Já adicionei de fato ao carrinho: ${JSON.stringify(action)}. Confirme isso à cliente e use [[IR_AO_PAGAMENTO]]. Não diga que vai adicionar — já está no carrinho.`,
+          });
+        } else if ("error" in action) {
+          messages.push({
+            role: "system",
+            content: `Não foi possível adicionar: ${action.error}. Peça outro tamanho disponível.`,
+          });
+        }
+      }
+    }
+
     if (coupon) {
       messages.push({
         role: "system",
@@ -423,11 +460,13 @@ export async function POST(request: Request) {
     }
 
     if (!reply) {
-      if (negotiating && focalProduct) {
+      if (cartActions[0]) {
+        reply = `Pronto! Adicionei ${cartActions[0].name} (tam. ${cartActions[0].size}) ao carrinho.\n\n[[IR_AO_PAGAMENTO]]`;
+      } else if (negotiating && focalProduct) {
         reply = [
           `Essa ${focalProduct.name} fica linda no dia a dia — entendo o pé atrás no valor.`,
           "O que mais pesou pra você: o preço em si ou alguma dúvida de tamanho/caimento?",
-        ].join(" ");
+        ].join("\n\n");
       } else if (products.length) {
         reply =
           "Encontrei estas opções. Quer que eu detalhe alguma ou adicione no carrinho (me diga o tamanho)?";
@@ -440,8 +479,28 @@ export async function POST(request: Request) {
         reply =
           "Posso te ajudar a achar uma peça, ver tamanhos/estoque ou tirar dúvidas da loja. O que você procura?";
       }
-      reply = sanitizeAssistantReply(reply);
     }
+
+    const formatted = formatAssistantReply(reply);
+    reply = formatted.text;
+
+    if (formatted.claimedCart && !cartActions.length) {
+      const recovered = await recoverCartActionFromClaim({
+        reply,
+        products: dedupeProducts(products),
+        historyTexts: cleaned.map((m) => m.content),
+        historyHint,
+      });
+      if (recovered) {
+        cartActions.push(recovered);
+      } else {
+        const askSize =
+          "Me confirma o tamanho (U, P, M ou G) pra eu colocar no carrinho de verdade?";
+        reply = [reply, askSize].filter(Boolean).join("\n\n");
+      }
+    }
+
+    const goCheckout = cartActions.length > 0 || formatted.goCheckout;
 
     // Não devolver cards de alternativa se o estágio não permite ou lista vazia
     const responseProducts =
@@ -457,15 +516,17 @@ export async function POST(request: Request) {
       whatsappUrl = handoff.whatsapp_url;
     }
 
+    const finalFormatted = formatAssistantReply(reply);
+
     return NextResponse.json({
-      reply,
+      reply: finalFormatted.text,
+      replies: finalFormatted.chunks,
       products: responseProducts,
       cart_actions: cartActions,
       coupon: mayOfferCoupon ? coupon : null,
       handoff_whatsapp: handoffWhatsapp,
       whatsapp_url: whatsappUrl,
-      // Só mostra CTA de pagamento se de fato adicionou ao carrinho
-      go_checkout: cartActions.length > 0,
+      go_checkout: goCheckout,
     });
   } catch (e) {
     console.error("[chat]", e);

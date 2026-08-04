@@ -63,6 +63,90 @@ export function sanitizeAssistantReply(text: string): string {
     .trim();
 }
 
+/** Extrai tamanho U/P/M/G de um texto. */
+export function extractSizeMention(text: string): ProductSize | null {
+  const m = String(text || "").match(
+    /\b(?:tam(?:anho)?\.?\s*:?\s*)?(U|P|M|G)\b/i
+  );
+  if (!m) return null;
+  return m[1].toUpperCase() as ProductSize;
+}
+
+export function claimsAddedToCart(text: string): boolean {
+  return /adicion(ei|ado)|coloquei .{0,40}carrinho|j[aá] (est[aá]|foi) no carrinho|separei .{0,40}carrinho|coloquei no seu carrinho|est[aá] no (seu )?carrinho/i.test(
+    String(text || "")
+  );
+}
+
+export function detectCheckoutIntent(text: string): boolean {
+  return /\[\[IR_AO_PAGAMENTO\]\]|\[\[GO_CHECKOUT\]\]|\[?\s*Finalizar[^\]]*compra[^\]]*\]?|ir para o (pagamento|carrinho|checkout)|seguir para o (pagamento|carrinho)|finalizar (minha )?compra/i.test(
+    String(text || "")
+  );
+}
+
+/**
+ * Limpa markdown/CTAs, detecta flags e quebra em bolhas (parágrafos).
+ */
+export function formatAssistantReply(text: string): {
+  text: string;
+  chunks: string[];
+  goCheckout: boolean;
+  claimedCart: boolean;
+} {
+  let raw = sanitizeAssistantReply(text);
+  const goCheckout = detectCheckoutIntent(raw);
+  const claimedCart = claimsAddedToCart(raw);
+
+  raw = raw
+    .replace(/\[\[IR_AO_PAGAMENTO\]\]/gi, "")
+    .replace(/\[\[GO_CHECKOUT\]\]/gi, "")
+    .replace(/\*{0,2}\[\s*[^\]]*(finalizar|pagamento|carrinho|checkout)[^\]]*\]\*{0,2}/gi, "")
+    .replace(/^\s*[-•]\s+/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const chunks = raw
+    .split(/\n\s*\n/)
+    .map((c) => c.replace(/\s+\n/g, "\n").trim())
+    .filter(Boolean);
+
+  return {
+    text: chunks.join("\n\n"),
+    chunks: chunks.length ? chunks : raw ? [raw] : [],
+    goCheckout,
+    claimedCart,
+  };
+}
+
+/** Tenta montar add_to_cart se a IA afirmou que adicionou sem chamar a tool. */
+export async function recoverCartActionFromClaim(opts: {
+  reply: string;
+  products: ChatProductCard[];
+  historyTexts: string[];
+  historyHint?: string | null;
+}): Promise<ChatCartAction | null> {
+  const { reply, products, historyTexts, historyHint } = opts;
+  if (!claimsAddedToCart(reply)) return null;
+
+  const blob = [reply, ...historyTexts].join(" \n ");
+  const size =
+    extractSizeMention(reply) ||
+    extractSizeMention(blob) ||
+    null;
+  if (!size) return null;
+
+  let product = products[0] || null;
+  if (!product && historyHint) {
+    const found = await toolSearchProducts(historyHint, 3);
+    product = found.products[0] || null;
+  }
+  if (!product) return null;
+
+  const action = await buildCartAction(product.id, size, 1);
+  if ("error" in action) return null;
+  return action;
+}
+
 export async function toolSearchProducts(query: string, limit = 6) {
   const q = String(query || "")
     .trim()
@@ -598,9 +682,11 @@ Empatia + peça pelo nome + valor concreto + 1 pergunta + fecho leve. Cupom só 
 
 Off-topic: recuse em uma frase e ofereça WhatsApp (build_whatsapp_handoff com resumo).
 Tom: pt-BR natural de vendedora. Sem pressão agressiva.
-Compra: peça+tamanho → add_to_cart → convidar ao pagamento no site.
+Compra: peça+tamanho → SEMPRE chame a tool add_to_cart → só então diga que adicionou. Sem tool = não afirme que colocou no carrinho.
+Pagamento: ao convidar a finalizar, escreva exatamente [[IR_AO_PAGAMENTO]] (o site transforma em botão). Não invente links nem [Finalizar...] em markdown.
+Formatação: NÃO use markdown (sem **negrito**, sem *itálico*). Texto puro. Parágrafos curtos separados por linha em branco.
 Não peça CPF/cartão no chat. Não finalize PIX aqui.
-Nunca escreva tags técnicas (ex.: channel).`;
+Nunca escreva tags técnicas (ex.: channel), exceto [[IR_AO_PAGAMENTO]] quando for o caso.`;
 }
 
 export type ChatIntent =

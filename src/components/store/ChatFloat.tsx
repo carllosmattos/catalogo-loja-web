@@ -23,6 +23,7 @@ type StoredChat = {
 };
 
 const IDLE_MS = 60 * 60 * 1000; // 1h
+const CHUNK_DELAY_MS = 750;
 
 interface ChatFloatProps {
   settings: StoreSettings;
@@ -67,6 +68,40 @@ function saveStored(customerId: string | null | undefined, messages: Msg[]) {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Renderiza **negrito** simples; remove * soltos. */
+function ChatText({ text }: { text: string }) {
+  const parts = String(text || "").split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const bold = part.match(/^\*\*([^*]+)\*\*$/);
+        if (bold) {
+          return (
+            <strong key={i} className="font-semibold">
+              {bold[1]}
+            </strong>
+          );
+        }
+        return <span key={i}>{part.replace(/\*/g, "")}</span>;
+      })}
+    </>
+  );
+}
+
+function splitReplyChunks(reply: string, replies?: unknown): string[] {
+  if (Array.isArray(replies) && replies.length) {
+    return replies.map((r) => String(r).trim()).filter(Boolean);
+  }
+  return String(reply || "")
+    .split(/\n\s*\n/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 export function ChatFloat({ settings }: ChatFloatProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -87,7 +122,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
   const loadedForCustomer = useRef<string | null>(null);
   const customerId = customer?.id || null;
 
-  // Histórico: logada = localStorage (nova conversa se idle > 1h). Visitante = mantém na sessão.
   useEffect(() => {
     if (!customerId) {
       loadedForCustomer.current = null;
@@ -115,12 +149,21 @@ export function ChatFloat({ settings }: ChatFloatProps) {
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, products, open]);
+  }, [messages, products, open, busy, showCheckout]);
 
-  // Fecha o painel ao mudar de página (checkout, catálogo, etc.)
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
+
+  async function revealAssistantChunks(chunks: string[]) {
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(CHUNK_DELAY_MS);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: chunks[i] },
+      ]);
+    }
+  }
 
   async function send(text?: string) {
     const content = (text ?? input).trim();
@@ -151,12 +194,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
           ? data.reply
           : "Não consegui responder agora. Tente de novo ou use o WhatsApp.";
 
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-
-      if (Array.isArray(data.products) && data.products.length) {
-        setProducts(data.products as ProductCard[]);
-      }
-
+      // Carrinho de fato — antes das bolhas
       if (Array.isArray(data.cart_actions)) {
         for (const action of data.cart_actions) {
           if (action?.type === "add" && action.product_id && action.size) {
@@ -171,7 +209,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                 ? String(action.image_url)
                 : undefined,
             });
-            setShowCheckout(true);
           }
         }
       }
@@ -183,10 +220,23 @@ export function ChatFloat({ settings }: ChatFloatProps) {
         );
       }
 
+      if (Array.isArray(data.products) && data.products.length) {
+        setProducts(data.products as ProductCard[]);
+      }
+
       if (data.handoff_whatsapp && data.whatsapp_url) {
         setWhatsappUrl(String(data.whatsapp_url));
       }
-      if (data.go_checkout && Array.isArray(data.cart_actions) && data.cart_actions.length) {
+
+      const chunks = splitReplyChunks(reply, data.replies);
+      await revealAssistantChunks(
+        chunks.length ? chunks : [reply]
+      );
+
+      if (
+        data.go_checkout ||
+        (Array.isArray(data.cart_actions) && data.cart_actions.length)
+      ) {
         setShowCheckout(true);
       }
     } catch {
@@ -218,14 +268,14 @@ export function ChatFloat({ settings }: ChatFloatProps) {
       ...prev,
       {
         role: "assistant",
-        content: `Adicionei ${p.name} (tam. ${size}) ao carrinho. Quer ir para o pagamento?`,
+        content: `Adicionei ${p.name} (tam. ${size}) ao carrinho.`,
       },
     ]);
   }
 
-  const goCheckout = useCallback(() => {
+  const goCart = useCallback(() => {
     setOpen(false);
-    router.push("/checkout");
+    router.push("/carrinho");
   }, [router]);
 
   return (
@@ -263,7 +313,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                     : "bg-white text-gray-800 shadow-sm"
                 )}
               >
-                {m.content}
+                <ChatText text={m.content} />
               </div>
             ))}
 
@@ -298,8 +348,9 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                             <button
                               key={s.size}
                               type="button"
+                              disabled={busy}
                               onClick={() => addProduct(p, s.size)}
-                              className="rounded-full border border-[var(--color-primary)]/30 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-primary)] hover:bg-[var(--color-accent)]"
+                              className="rounded-full border border-[var(--color-primary)]/30 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-primary)] hover:bg-[var(--color-accent)] disabled:opacity-40"
                             >
                               {s.size}
                             </button>
@@ -311,15 +362,15 @@ export function ChatFloat({ settings }: ChatFloatProps) {
               </div>
             )}
 
-            {(showCheckout || whatsappUrl) && (
+            {!busy && (showCheckout || whatsappUrl) && (
               <div className="flex flex-wrap gap-2">
                 {showCheckout && (
                   <button
                     type="button"
-                    onClick={goCheckout}
+                    onClick={goCart}
                     className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white"
                   >
-                    Ir para o pagamento
+                    Finalizar compra
                   </button>
                 )}
                 {whatsappUrl && (
@@ -351,9 +402,9 @@ export function ChatFloat({ settings }: ChatFloatProps) {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ex: tem vestido M?"
+              placeholder={busy ? "Aguarde a consultora…" : "Ex: tem vestido M?"}
               disabled={busy}
-              className="min-w-0 flex-1 rounded-full border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[var(--color-primary)]"
+              className="min-w-0 flex-1 rounded-full border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[var(--color-primary)] disabled:bg-gray-50"
             />
             <button
               type="submit"
@@ -367,7 +418,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
         </div>
       )}
 
-      {/* FAB só quando fechado — evita X gigante por cima do input */}
       {!open && (
         <button
           type="button"
