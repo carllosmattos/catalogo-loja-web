@@ -105,6 +105,10 @@ export default async function HomePage() {
           <Link href="/trocas-e-devolucoes" className="underline">
             Trocas e devoluções
           </Link>
+          {" · "}
+          <Link href="/privacidade" className="underline">
+            Privacidade
+          </Link>
         </p>
       </main>
     </>

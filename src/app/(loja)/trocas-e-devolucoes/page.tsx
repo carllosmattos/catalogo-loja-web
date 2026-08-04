@@ -111,6 +111,16 @@ export default async function TrocasDevolucoesPage() {
               Dúvidas? Fale conosco pelo WhatsApp cadastrado na loja.
             </p>
           )}
+
+          <p className="border-t border-gray-100 pt-4 text-xs text-gray-400">
+            <Link href="/privacidade" className="underline">
+              Privacidade
+            </Link>
+            {" · "}
+            <Link href="/" className="underline">
+              Início
+            </Link>
+          </p>
         </div>
       </main>
     </>
