@@ -181,15 +181,25 @@ export async function POST(request: Request) {
     }
 
     // Catálogo factual (preço/lista/busca) — sem LLM inventando número
+    const wantsCatalog =
+      intent.kind === "price" ||
+      intent.kind === "list" ||
+      intent.kind === "search" ||
+      /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUserText);
+
     if (
-      products.length &&
-      (intent.kind === "price" ||
-        intent.kind === "list" ||
-        intent.kind === "search" ||
-        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUserText)) &&
+      wantsCatalog &&
       intent.kind !== "hesitate" &&
       intent.kind !== "ask_coupon"
     ) {
+      if (!products.length && intent.kind === "list") {
+        const listed = await toolListRecentProducts(8);
+        products.push(...listed.products);
+      }
+      if (!products.length && intent.kind === "search" && intent.query) {
+        const found = await toolSearchProducts(intent.query, 6);
+        products.push(...found.products);
+      }
       const mode =
         intent.kind === "price" ||
         /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUserText)
@@ -205,6 +215,7 @@ export async function POST(request: Request) {
         coupon: null,
         handoff_whatsapp: false,
         whatsapp_url: null,
+        go_checkout: false,
       });
     }
 
@@ -453,7 +464,8 @@ export async function POST(request: Request) {
       coupon: mayOfferCoupon ? coupon : null,
       handoff_whatsapp: handoffWhatsapp,
       whatsapp_url: whatsappUrl,
-      go_checkout: /pagamento|checkout|carrinho|finalizar/i.test(reply),
+      // Só mostra CTA de pagamento se de fato adicionou ao carrinho
+      go_checkout: cartActions.length > 0,
     });
   } catch (e) {
     console.error("[chat]", e);

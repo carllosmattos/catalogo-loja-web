@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { MessageCircle, RotateCcw, Send, X } from "lucide-react";
+import { MessageCircle, Send, X } from "lucide-react";
 import { useCartStore, useCustomerStore } from "@/stores";
 import { formatCurrency, cn } from "@/lib/utils";
 import type { CouponValidation, ProductSize, StoreSettings } from "@/types";
@@ -67,16 +67,6 @@ function saveStored(customerId: string | null | undefined, messages: Msg[]) {
   }
 }
 
-function clearStored(customerId: string | null | undefined) {
-  const key = storageKey(customerId);
-  if (!key || typeof window === "undefined") return;
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    /* ignore */
-  }
-}
-
 export function ChatFloat({ settings }: ChatFloatProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -94,25 +84,18 @@ export function ChatFloat({ settings }: ChatFloatProps) {
   const [whatsappUrl, setWhatsappUrl] = useState<string | null>(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const loadedForCustomer = useRef<string | null>(null);
   const customerId = customer?.id || null;
 
-  const startFresh = useCallback(() => {
-    const next = [welcomeMsg(settings.store_name)];
-    setMessages(next);
-    setProducts([]);
-    setWhatsappUrl(null);
-    setShowCheckout(false);
-    clearStored(customerId);
-    if (customerId) saveStored(customerId, next);
-  }, [customerId, settings.store_name]);
-
-  // Histórico: só quando logada; nova conversa se idle > 1h
+  // Histórico: logada = localStorage (nova conversa se idle > 1h). Visitante = mantém na sessão.
   useEffect(() => {
     if (!customerId) {
-      setMessages([welcomeMsg(settings.store_name)]);
+      loadedForCustomer.current = null;
       setHydrated(true);
       return;
     }
+    if (loadedForCustomer.current === customerId) return;
+    loadedForCustomer.current = customerId;
     const stored = loadStored(customerId);
     const now = Date.now();
     if (stored && now - stored.updatedAt <= IDLE_MS && stored.messages.length) {
@@ -148,6 +131,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
     setBusy(true);
     setWhatsappUrl(null);
     setShowCheckout(false);
+    setProducts([]);
 
     try {
       const res = await fetch("/api/chat", {
@@ -202,7 +186,9 @@ export function ChatFloat({ settings }: ChatFloatProps) {
       if (data.handoff_whatsapp && data.whatsapp_url) {
         setWhatsappUrl(String(data.whatsapp_url));
       }
-      if (data.go_checkout) setShowCheckout(true);
+      if (data.go_checkout && Array.isArray(data.cart_actions) && data.cart_actions.length) {
+        setShowCheckout(true);
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -237,6 +223,11 @@ export function ChatFloat({ settings }: ChatFloatProps) {
     ]);
   }
 
+  const goCheckout = useCallback(() => {
+    setOpen(false);
+    router.push("/checkout");
+  }, [router]);
+
   return (
     <>
       {open && (
@@ -251,25 +242,14 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                 {customerId ? "Histórico salvo na sua conta" : "Chat da loja"}
               </p>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={startFresh}
-                className="rounded-full p-1.5 hover:bg-white/15"
-                aria-label="Nova conversa"
-                title="Nova conversa"
-              >
-                <RotateCcw className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-full p-1.5 hover:bg-white/15"
-                aria-label="Fechar chat"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-full p-1.5 hover:bg-white/15"
+              aria-label="Fechar chat"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto bg-[var(--color-accent)]/40 p-3">
@@ -277,7 +257,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
               <div
                 key={`${m.role}-${i}`}
                 className={cn(
-                  "max-w-[90%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                  "max-w-[90%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
                   m.role === "user"
                     ? "ml-auto bg-[var(--color-primary)] text-white"
                     : "bg-white text-gray-800 shadow-sm"
@@ -336,10 +316,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                 {showCheckout && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setOpen(false);
-                      router.push("/checkout");
-                    }}
+                    onClick={goCheckout}
                     className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white"
                   >
                     Ir para o pagamento
@@ -390,15 +367,18 @@ export function ChatFloat({ settings }: ChatFloatProps) {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-36 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-lg transition-transform hover:scale-105 active:scale-95 md:bottom-24 md:right-6"
-        aria-label={open ? "Fechar chat" : "Abrir chat da loja"}
-        title="Chat da loja"
-      >
-        {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-7 w-7" />}
-      </button>
+      {/* FAB só quando fechado — evita X gigante por cima do input */}
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="fixed bottom-36 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-lg transition-transform hover:scale-105 active:scale-95 md:bottom-24 md:right-6"
+          aria-label="Abrir chat da loja"
+          title="Chat da loja"
+        >
+          <MessageCircle className="h-7 w-7" />
+        </button>
+      )}
     </>
   );
 }

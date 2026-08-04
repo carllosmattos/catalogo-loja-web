@@ -71,17 +71,34 @@ export async function toolSearchProducts(query: string, limit = 6) {
     .slice(0, 80);
   if (!q) return { products: [] as ChatProductCard[], note: "Informe um termo de busca." };
 
-  const supabase = await createServiceClient();
-  const { data } = await supabase
-    .from("products")
-    .select("*")
-    .eq("active", true)
-    .or(`name.ilike.%${q}%,category.ilike.%${q}%,description.ilike.%${q}%`)
-    .order("created_at", { ascending: false })
-    .limit(Math.min(12, Math.max(1, limit)));
+  const variants = Array.from(
+    new Set([
+      q,
+      q.replace(/t\s*-?\s*shirt/gi, "t-shirt"),
+      q.replace(/t\s*-?\s*shirt/gi, "tshirt"),
+      q.replace(/t\s*-?\s*shirt/gi, "camiseta"),
+    ].map((v) => v.trim()).filter(Boolean))
+  );
 
-  const ids = (data || []).map((p) => p.id);
-  if (!ids.length) {
+  const supabase = await createServiceClient();
+  let data: Product[] | null = null;
+  for (const term of variants) {
+    const { data: rows } = await supabase
+      .from("products")
+      .select("*")
+      .eq("active", true)
+      .or(
+        `name.ilike.%${term}%,category.ilike.%${term}%,description.ilike.%${term}%`
+      )
+      .order("created_at", { ascending: false })
+      .limit(Math.min(12, Math.max(1, limit)));
+    if (rows?.length) {
+      data = rows as Product[];
+      break;
+    }
+  }
+
+  if (!data?.length) {
     // Fallback: primeiros produtos ativos
     const { data: fallback } = await supabase
       .from("products")
@@ -97,7 +114,7 @@ export async function toolSearchProducts(query: string, limit = 6) {
     };
   }
 
-  const withSizes = await attachSizesLocal(data || []);
+  const withSizes = await attachSizesLocal(data);
   const cards = onlyInStock(await Promise.all(withSizes.map(toCard)));
   return { products: cards, note: null as string | null };
 }
@@ -479,7 +496,7 @@ export function wantsAlternative(text: string): boolean {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-  return /\b(outra|outro|mais barat|mais em conta|alternativa|outra opcao|outra opção|outra peca|outra peça|tem algo|tem alguma)\b/.test(
+  return /\b(outra|outro|mais barat|mais em conta|alternativa|outra opcao|outra opção|outra peca|outra peça)\b/.test(
     t
   );
 }
@@ -638,23 +655,28 @@ export function detectChatIntent(text: string): ChatIntent {
     return { kind: "price" };
   }
   if (
-    /\b(quais pecas|quais peças|o que tem|pecas disponiveis|peças disponíveis|catalogo|catálogo|tem disponivel|tem disponível)\b/.test(
+    /\b(quais pecas|quais peças|o que tem|pecas disponiveis|peças disponíveis|catalogo|catálogo|tem disponivel|tem disponível|qualquer (uma|peca|peça)|alguma peca|alguma peça|pecas com estoque|peças com estoque)\b/.test(
+      t
+    ) ||
+    /\b(tem alguma|tem algo|mostra (as )?pecas|mostra (as )?peças|lista(r)? (as )?pecas|lista(r)? (as )?peças)\b/.test(
       t
     )
   ) {
     return { kind: "list" };
   }
+  // Normaliza tshirt / t-shirt
+  const tNorm = t.replace(/t\s*-?\s*shirt/g, "tshirt");
   const fashion =
-    t.match(
-      /\b(vestido|blusa|saia|calca|calça|short|conjunto|cropped|body|macacao|macacão|jaqueta|casaco|regata|top|lingerie|calcinha|sutiã|sutia|camiseta|t-?shirt|urso)\b/
-    ) || t.match(/(tem |quero |procuro |mostra |mostrar )(.{2,40})/);
+    tNorm.match(
+      /\b(vestido|blusa|saia|calca|calça|short|conjunto|cropped|body|macacao|macacão|jaqueta|casaco|regata|top|lingerie|calcinha|sutiã|sutia|camiseta|tshirt|urso)\b/
+    ) || tNorm.match(/(tem |quero |procuro |mostra |mostrar )(.{2,40})/);
   if (fashion) {
+    const raw = fashion[0]
+      .replace(/^(tem |quero |procuro |mostra |mostrar )/i, "")
+      .trim();
     return {
       kind: "search",
-      query:
-        fashion[0]
-          .replace(/^(tem |quero |procuro |mostra |mostrar )/i, "")
-          .trim() || fashion[0],
+      query: (raw || fashion[0]).replace(/\btshirt\b/g, "t-shirt"),
     };
   }
   return { kind: "other" };
