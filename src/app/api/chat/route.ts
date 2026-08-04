@@ -8,10 +8,12 @@ import {
   buildWhatsappContextSummary,
   countHesitations,
   detectChatIntent,
+  detectSizeChoice,
   extractProductHintFromHistory,
   extractSizeMention,
   formatAssistantReply,
   getNegotiationStage,
+  isShortAffirmation,
   recoverCartActionFromClaim,
   runChatTool,
   sanitizeAssistantReply,
@@ -293,20 +295,36 @@ export async function POST(request: Request) {
       });
     }
 
-    // Cliente pediu tamanho → tenta add_to_cart de verdade (não depende da LLM)
-    const sizeAsk = extractSizeMention(lastUserText);
-    const wantsAdd =
-      sizeAsk &&
-      (/\b(adiciona|coloca|quero|pode|manda|carrinho|esse|essa|pega)\b/i.test(
-        lastUserText
-      ) ||
-        /^(tam(anho)?\.?\s*)?(U|P|M|G)$/i.test(lastUserText.trim()));
-    if (wantsAdd && sizeAsk) {
+    // Cliente escolheu/confirmou tamanho → add_to_cart de verdade (não depende da LLM)
+    let sizeAsk =
+      detectSizeChoice(lastUserText) || extractSizeMention(lastUserText);
+    if (!sizeAsk && isShortAffirmation(lastUserText)) {
+      const lastAsst = [...cleaned].reverse().find((m) => m.role === "assistant");
+      if (lastAsst) sizeAsk = extractSizeMention(lastAsst.content);
+    }
+
+    if (sizeAsk) {
       let target = products[0] || null;
       if (!target && historyHint) {
         const found = await toolSearchProducts(historyHint, 3);
         target = found.products[0] || null;
         if (target) products.push(target);
+      }
+      // Fallback: última peça citada no histórico assistente/usuário
+      if (!target) {
+        const blob = cleaned
+          .map((m) => m.content)
+          .join(" ")
+          .slice(-500);
+        const hint =
+          extractProductHintFromHistory(cleaned) ||
+          blob.match(/t-?shirt[^.\n?]{0,40}/i)?.[0] ||
+          null;
+        if (hint) {
+          const found = await toolSearchProducts(hint, 3);
+          target = found.products[0] || null;
+          if (target) products.push(target);
+        }
       }
       if (target) {
         const action = await buildCartAction(target.id, sizeAsk, 1);
@@ -314,14 +332,20 @@ export async function POST(request: Request) {
           cartActions.push(action);
           messages.push({
             role: "system",
-            content: `Já adicionei de fato ao carrinho: ${JSON.stringify(action)}. Confirme isso à cliente e use [[IR_AO_PAGAMENTO]]. Não diga que vai adicionar — já está no carrinho.`,
+            content: `Já adicionei de fato ao carrinho: ${JSON.stringify(action)}. Confirme isso à cliente em poucas frases e use [[IR_AO_PAGAMENTO]]. NÃO diga que "vai" adicionar — já está no carrinho do site.`,
           });
         } else if ("error" in action) {
           messages.push({
             role: "system",
-            content: `Não foi possível adicionar: ${action.error}. Peça outro tamanho disponível.`,
+            content: `Não foi possível adicionar: ${action.error}. Peça outro tamanho disponível. NÃO diga que colocou no carrinho.`,
           });
         }
+      } else {
+        messages.push({
+          role: "system",
+          content:
+            "A cliente indicou um tamanho, mas a peça não foi identificada. Pergunte o nome da peça. NÃO diga que adicionou ao carrinho.",
+        });
       }
     }
 
@@ -494,13 +518,16 @@ export async function POST(request: Request) {
       if (recovered) {
         cartActions.push(recovered);
       } else {
-        const askSize =
-          "Me confirma o tamanho (U, P, M ou G) pra eu colocar no carrinho de verdade?";
-        reply = [reply, askSize].filter(Boolean).join("\n\n");
+        // Não deixar a IA mentir: corrige a resposta
+        reply = [
+          "Ainda não consegui colocar no carrinho por aqui.",
+          "Me confirma a peça e o tamanho (U, P, M ou G) que eu adiciono de verdade?",
+        ].join("\n\n");
       }
     }
 
-    const goCheckout = cartActions.length > 0 || formatted.goCheckout;
+    // Botão só se o item entrou de fato no carrinho
+    const goCheckout = cartActions.length > 0;
 
     // Não devolver cards de alternativa se o estágio não permite ou lista vazia
     const responseProducts =

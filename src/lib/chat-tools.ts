@@ -72,9 +72,62 @@ export function extractSizeMention(text: string): ProductSize | null {
   return m[1].toUpperCase() as ProductSize;
 }
 
+/** Cliente confirmou/escolheu tamanho (ex.: "M é ótima", "pode ser M", "M"). */
+export function detectSizeChoice(text: string): ProductSize | null {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  const t = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const size = extractSizeMention(t);
+  if (!size) return null;
+  const s = size.toLowerCase();
+
+  if (new RegExp(`^(tam(anho)?\\.?\\s*:?\\s*)?${s}$`, "i").test(t)) {
+    return size;
+  }
+
+  const affirm =
+    "(otim[oa]|boa|bom|perfeit[oa]|fechado|fechou|beleza|sim|isso|ok|okay|claro|quero|vou|fico|vamos|pode|esse|essa|entao)";
+  // "M e otima" / "M entao"
+  if (new RegExp(`\\b${s}\\b.{0,30}\\b${affirm}\\b`, "i").test(t)) {
+    return size;
+  }
+  // "pode ser M" / "fico no M" / "vamos de M"
+  if (
+    new RegExp(
+      `\\b(pode ser|quero|vou de|fico (com|no|na)|vamos de|pode|tamanho)\\b.{0,20}\\b${s}\\b`,
+      "i"
+    ).test(t)
+  ) {
+    return size;
+  }
+  if (
+    new RegExp(
+      `\\b(adiciona|coloca|manda|carrinho).{0,30}\\b${s}\\b|\\b${s}\\b.{0,30}\\b(carrinho|adiciona|coloca)\\b`,
+      "i"
+    ).test(t)
+  ) {
+    return size;
+  }
+  return null;
+}
+
+/** Afirmação curta após a consultora sugerir um tamanho. */
+export function isShortAffirmation(text: string): boolean {
+  return /^(sim|pode|otimo|ótimo|otima|ótima|beleza|fechado|isso|ok|okay|claro|uhum|ahm)[\s!.]*$/i.test(
+    String(text || "").trim()
+  );
+}
+
 export function claimsAddedToCart(text: string): boolean {
-  return /adicion(ei|ado)|coloquei .{0,40}carrinho|j[aá] (est[aá]|foi) no carrinho|separei .{0,40}carrinho|coloquei no seu carrinho|est[aá] no (seu )?carrinho/i.test(
-    String(text || "")
+  const t = String(text || "");
+  if (/\b(n[aã]o|ainda n[aã]o|sem|vou)\b.{0,40}carrinho/i.test(t)) {
+    return false;
+  }
+  return /adicion(ei|ado)|deix(ei|amos).{0,60}carrinho|coloc(quei|amos).{0,60}carrinho|j[aá] .{0,40}carrinho|separei .{0,40}carrinho|est[aá] (no|no seu) carrinho|aqui no carrinho/i.test(
+    t
   );
 }
 
