@@ -131,6 +131,16 @@ export function claimsAddedToCart(text: string): boolean {
   );
 }
 
+/** Remove parágrafos que fingem add/checkout quando não houve add real. */
+export function scrubFalseCartClaims(text: string): string {
+  const parts = String(text || "")
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((p) => !claimsAddedToCart(p) && !detectCheckoutIntent(p));
+  return parts.join("\n\n");
+}
+
 export function detectCheckoutIntent(text: string): boolean {
   return /\[\[IR_AO_PAGAMENTO\]\]|\[\[GO_CHECKOUT\]\]|\[?\s*Finalizar[^\]]*compra[^\]]*\]?|ir para o (pagamento|carrinho|checkout)|seguir para o (pagamento|carrinho)|finalizar (minha )?compra/i.test(
     String(text || "")

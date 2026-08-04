@@ -23,7 +23,13 @@ type StoredChat = {
 };
 
 const IDLE_MS = 60 * 60 * 1000; // 1h
-const CHUNK_DELAY_MS = 750;
+
+/** Tempo “digitando” proporcional ao tamanho (~38 caracteres/s), com limites. */
+function typingDelayMs(text: string): number {
+  const len = String(text || "").trim().length;
+  const ms = Math.round((len / 38) * 1000);
+  return Math.min(4200, Math.max(1100, ms));
+}
 
 interface ChatFloatProps {
   settings: StoreSettings;
@@ -157,7 +163,8 @@ export function ChatFloat({ settings }: ChatFloatProps) {
 
   async function revealAssistantChunks(chunks: string[]) {
     for (let i = 0; i < chunks.length; i++) {
-      if (i > 0) await sleep(CHUNK_DELAY_MS);
+      // Pausa = tempo de digitar a mensagem que vai aparecer
+      await sleep(typingDelayMs(chunks[i]));
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: chunks[i] },
@@ -194,7 +201,8 @@ export function ChatFloat({ settings }: ChatFloatProps) {
           ? data.reply
           : "Não consegui responder agora. Tente de novo ou use o WhatsApp.";
 
-      // Carrinho de fato — antes das bolhas
+      // Carrinho de fato — só libera botão se addItem rodou
+      let addedToCart = false;
       if (Array.isArray(data.cart_actions)) {
         for (const action of data.cart_actions) {
           if (action?.type === "add" && action.product_id && action.size) {
@@ -209,6 +217,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                 ? String(action.image_url)
                 : undefined,
             });
+            addedToCart = true;
           }
         }
       }
@@ -229,14 +238,10 @@ export function ChatFloat({ settings }: ChatFloatProps) {
       }
 
       const chunks = splitReplyChunks(reply, data.replies);
-      await revealAssistantChunks(
-        chunks.length ? chunks : [reply]
-      );
+      await revealAssistantChunks(chunks.length ? chunks : [reply]);
 
-      if (
-        data.go_checkout ||
-        (Array.isArray(data.cart_actions) && data.cart_actions.length)
-      ) {
+      // CTA só com item realmente adicionado neste turno
+      if (addedToCart) {
         setShowCheckout(true);
       }
     } catch {

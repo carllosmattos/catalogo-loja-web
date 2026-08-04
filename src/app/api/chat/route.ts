@@ -15,6 +15,7 @@ import {
   getNegotiationStage,
   isShortAffirmation,
   recoverCartActionFromClaim,
+  scrubFalseCartClaims,
   runChatTool,
   sanitizeAssistantReply,
   toolBuildWhatsappHandoff,
@@ -517,13 +518,18 @@ export async function POST(request: Request) {
       });
       if (recovered) {
         cartActions.push(recovered);
-      } else {
-        // Não deixar a IA mentir: corrige a resposta
-        reply = [
-          "Ainda não consegui colocar no carrinho por aqui.",
+      }
+    }
+
+    // Sem add real: nunca afirmar carrinho nem liberar CTA
+    if (!cartActions.length) {
+      const cleanedReply = scrubFalseCartClaims(reply);
+      reply =
+        cleanedReply ||
+        [
+          "Ainda não coloquei no carrinho.",
           "Me confirma a peça e o tamanho (U, P, M ou G) que eu adiciono de verdade?",
         ].join("\n\n");
-      }
     }
 
     // Botão só se o item entrou de fato no carrinho
