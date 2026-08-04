@@ -467,27 +467,120 @@ export async function toolGetStoreInfo() {
   };
 }
 
+export type NegotiationStage =
+  | "probe"
+  | "value"
+  | "alternative"
+  | "close"
+  | "coupon";
+
+export function wantsAlternative(text: string): boolean {
+  const t = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /\b(outra|outro|mais barat|mais em conta|alternativa|outra opcao|outra opção|outra peca|outra peça|tem algo|tem alguma)\b/.test(
+    t
+  );
+}
+
+/** Estágio da conversa de venda a partir do histórico. */
+export function getNegotiationStage(
+  hesitations: number,
+  intentKind: string,
+  lastUserText: string
+): NegotiationStage {
+  if (intentKind === "ask_coupon" || hesitations >= 3) return "coupon";
+  if (wantsAlternative(lastUserText) && hesitations >= 1) return "alternative";
+  if (hesitations >= 2) return "value";
+  if (hesitations >= 1 || intentKind === "hesitate") return "probe";
+  return "close";
+}
+
+export function buildNegotiationGuide(opts: {
+  stage: NegotiationStage;
+  focalProduct: ChatProductCard | null;
+  alternatives: ChatProductCard[];
+  mayOfferCoupon: boolean;
+  hasCoupon: boolean;
+}): string {
+  const { stage, focalProduct, alternatives, mayOfferCoupon, hasCoupon } = opts;
+  const focal = focalProduct
+    ? `${focalProduct.name} (${formatMoneyBr(focalProduct.price)}; tamanhos: ${(focalProduct.sizes || []).map((s) => s.size).join(", ") || "—"})`
+    : "peça ainda não identificada no histórico — pergunte qual peça ela está olhando";
+
+  const altBlock =
+    alternatives.length > 0
+      ? `ALTERNATIVAS COM ESTOQUE (pode mostrar):\n${JSON.stringify(alternatives.slice(0, 4))}`
+      : "ALTERNATIVAS: nenhuma com estoque agora. NÃO diga que vai mostrar outra peça. Não invente nomes/preços. Foque na peça atual, no fecho ou no WhatsApp.";
+
+  const stageLines: Record<NegotiationStage, string> = {
+    probe: [
+      "ESTÁGIO: probe (1ª hesitação).",
+      "Aja como vendedora de moda: acolha, cite a PEÇA EM JOGO pelo nome, diga 1 gancho de valor concreto (caimento, uso no dia a dia, como combina).",
+      "Faça UMA pergunta só (ex.: valor em si, comparação, ou dúvida de tamanho).",
+      "NÃO ofereça cupom. NÃO diga que tem outra peça se não houver alternativas listadas.",
+      "Tom natural de loja, sem linguagem corporativa ('investimento', 'priorizamos acabamento').",
+    ].join(" "),
+    value: [
+      "ESTÁGIO: value.",
+      "Reforce o valor da peça em jogo com 1–2 frases práticas (como vestir / ocasião).",
+      "Feche leve: convidar a escolher tamanho e ir ao carrinho.",
+      "Só mencione outra opção se houver ALTERNATIVAS COM ESTOQUE acima.",
+      "Ainda sem cupom, a menos que o sistema diga o contrário.",
+    ].join(" "),
+    alternative: [
+      "ESTÁGIO: alternative.",
+      alternatives.length
+        ? "Apresente no máximo 1–2 alternativas listadas (com preço real) e pergunte qual prefere."
+        : "Não há alternativa em estoque. Seja honesta: continue com a peça atual, ajuste de tamanho, ou WhatsApp — sem prometer catálogo.",
+    ].join(" "),
+    close: [
+      "ESTÁGIO: close.",
+      "Convide com clareza a escolher o tamanho e seguir ao pagamento no site.",
+    ].join(" "),
+    coupon: [
+      "ESTÁGIO: coupon.",
+      mayOfferCoupon && hasCoupon
+        ? "Ofereça NO MÁXIMO o cupom já validado pelo sistema, como gesto, e convide ao carrinho."
+        : mayOfferCoupon
+          ? "Não há cupom aplicável. Seja honesta e mantenha o fecho ou WhatsApp."
+          : "Ainda não libere cupom.",
+    ].join(" "),
+  };
+
+  return [
+    "PLAYBOOK DE VENDA (obrigatório nesta resposta):",
+    `PEÇA EM JOGO: ${focal}`,
+    altBlock,
+    stageLines[stage],
+    "Resposta curta (2–4 frases), 1 pergunta no máximo, 1 CTA claro. Sem tags técnicas.",
+  ].join("\n");
+}
+
 export function buildSystemPrompt(storeName: string): string {
   return `Você é a consultora de vendas da "${storeName}", loja de moda feminina online.
-Proposta da loja: peças femininas com carinho, atendimento humanizado, compra pelo site (PIX) e suporte no WhatsApp. Você ajuda a descobrir o estilo da cliente, sugerir tamanho e tirar dúvidas de estoque/pedido.
+Aja como vendedora de boutique: calorosa, segura, prática — conversa real de loja, não script de chatbot.
+
+Proposta da loja: peças femininas com carinho, atendimento humanizado, compra pelo site (PIX) e suporte no WhatsApp.
 
 Escopo: só peças, tamanhos, estoque, preços, frete em geral, cupons/promoções válidos e pedidos desta loja.
 Sobre a loja: use get_store_info se perguntarem o que a loja é / o que oferece.
 
 REGRA CRÍTICA DE DADOS:
-- Nunca invente preço, estoque, tamanho ou cupom.
-- Só use dados das tools / "DADOS DO CATÁLOGO".
-- Peça só é disponível se houver tamanho com stock > 0. Cadastro ativo sem estoque = indisponível.
-- Cupom/promoção: só mencione se a tool confirmou que é aplicável àquela cliente. Não cite cupons usados, esgotados ou inválidos.
+- Nunca invente preço, estoque, tamanho, nome de peça ou cupom.
+- Só use dados das tools / "DADOS DO CATÁLOGO" / playbook.
+- Peça só é disponível se houver tamanho com stock > 0.
+- Alternativa/outra peça: SÓ se houver produtos com estoque nos dados. Se a lista estiver vazia, não diga que vai mostrar outra opção.
+- Cupom/promoção: só se a tool/sistema confirmar aplicável. Nunca despeje vários cupons.
 - Preço = campo "price" (reais).
 
-NEGOCIAÇÃO (objeção de preço / "tá caro"):
-1) Na primeira hesitação: empatia + pergunte o motivo + fale de qualidade/caimento/tecido/como vestir. NÃO ofereça cupom ainda.
-2) Só ofereça cupom se ela insistir no preço OU pedir desconto/cupom explicitamente. Ofereça NO MÁXIMO UM cupom já validado (list_active_coupons).
-3) Nunca despeje a lista inteira de cupons.
+NEGOCIAÇÃO (objeção / "tá caro" / "vou pensar"):
+Siga o PLAYBOOK DE VENDA quando enviado (estágios probe → value → alternative → close → coupon).
+Empatia + peça pelo nome + valor concreto + 1 pergunta + fecho leve. Cupom só no estágio coupon.
 
-Off-topic: recuse em uma frase e ofereça WhatsApp (build_whatsapp_handoff com resumo do contexto).
-Tom: acolhedora, segura, sem pressão. Respostas curtas em pt-BR.
+Off-topic: recuse em uma frase e ofereça WhatsApp (build_whatsapp_handoff com resumo).
+Tom: pt-BR natural de vendedora. Sem pressão agressiva.
 Compra: peça+tamanho → add_to_cart → convidar ao pagamento no site.
 Não peça CPF/cartão no chat. Não finalize PIX aqui.
 Nunca escreva tags técnicas (ex.: channel).`;

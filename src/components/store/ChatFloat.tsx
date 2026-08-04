@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { MessageCircle, RotateCcw, Send, X } from "lucide-react";
 import { useCartStore, useCustomerStore } from "@/stores";
 import { formatCurrency, cn } from "@/lib/utils";
@@ -79,6 +79,7 @@ function clearStored(customerId: string | null | undefined) {
 
 export function ChatFloat({ settings }: ChatFloatProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const customer = useCustomerStore((s) => s.customer);
   const addItem = useCartStore((s) => s.addItem);
   const setCoupon = useCartStore((s) => s.setCoupon);
@@ -132,6 +133,11 @@ export function ChatFloat({ settings }: ChatFloatProps) {
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, products, open]);
+
+  // Fecha o painel ao mudar de página (checkout, catálogo, etc.)
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
 
   async function send(text?: string) {
     const content = (text ?? input).trim();
@@ -330,7 +336,10 @@ export function ChatFloat({ settings }: ChatFloatProps) {
                 {showCheckout && (
                   <button
                     type="button"
-                    onClick={() => router.push("/checkout")}
+                    onClick={() => {
+                      setOpen(false);
+                      router.push("/checkout");
+                    }}
                     className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white"
                   >
                     Ir para o pagamento

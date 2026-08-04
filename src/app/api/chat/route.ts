@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import {
   CHAT_TOOLS,
   buildFactualProductReply,
+  buildNegotiationGuide,
   buildSystemPrompt,
   buildWhatsappContextSummary,
   countHesitations,
   detectChatIntent,
   extractProductHintFromHistory,
+  getNegotiationStage,
   runChatTool,
   sanitizeAssistantReply,
   toolBuildWhatsappHandoff,
@@ -14,6 +16,7 @@ import {
   toolListApplicableCoupons,
   toolListRecentProducts,
   toolSearchProducts,
+  wantsAlternative,
   type ChatCartAction,
   type ChatProductCard,
 } from "@/lib/chat-tools";
@@ -103,7 +106,8 @@ export async function POST(request: Request) {
 
     const settings = await fetchStoreSettings();
     const lastUser = [...cleaned].reverse().find((m) => m.role === "user");
-    const intent = detectChatIntent(lastUser?.content || "");
+    const lastUserText = lastUser?.content || "";
+    const intent = detectChatIntent(lastUserText);
     const historyHint = extractProductHintFromHistory(cleaned);
     const waSummary = () =>
       buildWhatsappContextSummary(cleaned, { productHint: historyHint });
@@ -141,11 +145,10 @@ export async function POST(request: Request) {
       });
     }
 
-    // Cupom só se pedir explicitamente OU insistir no preço (2+ hesitações)
     const hesitations = countHesitations(cleaned);
+    const stage = getNegotiationStage(hesitations, intent.kind, lastUserText);
     const mayOfferCoupon =
-      intent.kind === "ask_coupon" ||
-      (intent.kind === "hesitate" && hesitations >= 2);
+      intent.kind === "ask_coupon" || stage === "coupon";
 
     if (mayOfferCoupon) {
       const listed = await toolListApplicableCoupons(customerId);
@@ -171,24 +174,25 @@ export async function POST(request: Request) {
       }
     } else if (
       historyHint &&
-      /\b(dela|dele|dessa|desse|essa|esse|aquela)\b/i.test(
-        lastUser?.content || ""
-      )
+      /\b(dela|dele|dessa|desse|essa|esse|aquela)\b/i.test(lastUserText)
     ) {
       const found = await toolSearchProducts(historyHint, 4);
       products.push(...found.products);
     }
 
+    // Catálogo factual (preço/lista/busca) — sem LLM inventando número
     if (
       products.length &&
       (intent.kind === "price" ||
         intent.kind === "list" ||
         intent.kind === "search" ||
-        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUser?.content || ""))
+        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUserText)) &&
+      intent.kind !== "hesitate" &&
+      intent.kind !== "ask_coupon"
     ) {
       const mode =
         intent.kind === "price" ||
-        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUser?.content || "")
+        /\b(valor|preco|preço|custa|quanto)\b/i.test(lastUserText)
           ? "price"
           : intent.kind === "list"
             ? "list"
@@ -204,22 +208,46 @@ export async function POST(request: Request) {
       });
     }
 
-    // Primeira hesitação: força negociação sem cupom
-    if (intent.kind === "hesitate" && hesitations < 2) {
-      return NextResponse.json({
-        reply: sanitizeAssistantReply(
-          [
-            "Entendo perfeitamente — o investimento importa.",
-            "Me conta o que mais pesou pra você: o valor em si, o caimento, ou estava comparando com outra peça?",
-            "As nossas peças priorizam caimento e acabamento pra vestir bem no dia a dia. Se quiser, te ajudo a achar uma opção no seu estilo e orçamento.",
-          ].join(" ")
-        ),
-        products: dedupeProducts(products).slice(0, 8),
-        cart_actions: [],
-        coupon: null,
-        handoff_whatsapp: false,
-        whatsapp_url: null,
-      });
+    // Negociação: carrega peça em jogo + alternativas só com estoque
+    let focalProduct: ChatProductCard | null = null;
+    let alternatives: ChatProductCard[] = [];
+    const negotiating =
+      intent.kind === "hesitate" ||
+      intent.kind === "ask_coupon" ||
+      stage === "alternative" ||
+      wantsAlternative(lastUserText);
+
+    if (negotiating) {
+      if (historyHint) {
+        const found = await toolSearchProducts(historyHint, 4);
+        if (found.products[0]) {
+          focalProduct = found.products[0];
+          products.push(...found.products);
+        }
+      }
+
+      const canShowAlts =
+        stage === "alternative" ||
+        (stage === "value" && wantsAlternative(lastUserText)) ||
+        (stage === "coupon" && wantsAlternative(lastUserText));
+
+      if (canShowAlts) {
+        const q =
+          historyHint
+            ?.replace(/\b(t-?shirt|camiseta|vestido|blusa|conjunto|saia)\b/i, "")
+            .trim() || "blusa";
+        const categoryGuess =
+          historyHint?.match(
+            /\b(t-?shirt|camiseta|vestido|blusa|conjunto|saia|short|calca|calça)\b/i
+          )?.[0] || q;
+        const altSearch = await toolSearchProducts(String(categoryGuess), 6);
+        alternatives = altSearch.products.filter(
+          (p) => !focalProduct || p.id !== focalProduct.id
+        );
+        if (alternatives.length) {
+          products.push(...alternatives);
+        }
+      }
     }
 
     const messages: ChatMessage[] = [
@@ -229,6 +257,19 @@ export async function POST(request: Request) {
         content: m.content,
       })),
     ];
+
+    if (negotiating) {
+      messages.push({
+        role: "system",
+        content: buildNegotiationGuide({
+          stage,
+          focalProduct,
+          alternatives,
+          mayOfferCoupon,
+          hasCoupon: Boolean(coupon),
+        }),
+      });
+    }
 
     if (products.length) {
       messages.push({
@@ -245,7 +286,7 @@ export async function POST(request: Request) {
       messages.push({
         role: "system",
         content:
-          "Não há cupom aplicável agora para esta cliente. Seja honesta e ofereça ajuda por qualidade/outra peça ou WhatsApp.",
+          "Não há cupom aplicável agora para esta cliente. Seja honesta. Não prometa outras peças sem dados de estoque.",
       });
     }
 
@@ -276,7 +317,20 @@ export async function POST(request: Request) {
 
             if (toolName === "search_products") {
               const r = toolResult as { products?: ChatProductCard[] };
-              if (r.products?.length) products.push(...r.products);
+              if (r.products?.length) {
+                products.push(...r.products);
+                if (negotiating && !focalProduct) {
+                  focalProduct = r.products[0];
+                } else if (negotiating) {
+                  const extras = r.products.filter(
+                    (p) => !focalProduct || p.id !== focalProduct.id
+                  );
+                  alternatives = dedupeProducts([
+                    ...alternatives,
+                    ...extras,
+                  ]);
+                }
+              }
             }
             if (toolName === "get_product") {
               const r = toolResult as { product?: ChatProductCard | null };
@@ -300,7 +354,7 @@ export async function POST(request: Request) {
                 toolResult = {
                   coupons: [],
                   has_coupons: false,
-                  note: "Ainda não ofereça cupom — continue negociando (qualidade/motivo).",
+                  note: "Ainda não ofereça cupom — continue o playbook (valor/fecho).",
                 };
               } else {
                 const r = toolResult as {
@@ -358,20 +412,33 @@ export async function POST(request: Request) {
     }
 
     if (!reply) {
-      if (products.length) {
+      if (negotiating && focalProduct) {
+        reply = [
+          `Essa ${focalProduct.name} fica linda no dia a dia — entendo o pé atrás no valor.`,
+          "O que mais pesou pra você: o preço em si ou alguma dúvida de tamanho/caimento?",
+        ].join(" ");
+      } else if (products.length) {
         reply =
           "Encontrei estas opções. Quer que eu detalhe alguma ou adicione no carrinho (me diga o tamanho)?";
       } else if (coupon) {
         reply = `Tenho um cupom que pode ajudar: ${coupon.code}. Posso aplicar no carrinho se quiser.`;
       } else if (intent.kind === "ask_coupon" || mayOfferCoupon) {
         reply =
-          "No momento não tenho cupom aplicável pra você, mas posso te ajudar a escolher outra peça ou falar no WhatsApp.";
+          "No momento não tenho cupom aplicável pra você. Quer que eu te ajude a escolher o tamanho dessa peça ou falar no WhatsApp?";
       } else {
         reply =
           "Posso te ajudar a achar uma peça, ver tamanhos/estoque ou tirar dúvidas da loja. O que você procura?";
       }
       reply = sanitizeAssistantReply(reply);
     }
+
+    // Não devolver cards de alternativa se o estágio não permite ou lista vazia
+    const responseProducts =
+      negotiating && alternatives.length === 0 && stage === "alternative"
+        ? focalProduct
+          ? [focalProduct]
+          : []
+        : dedupeProducts(products).slice(0, 8);
 
     if (/whatsapp|atendente/i.test(reply) && !whatsappUrl) {
       const handoff = await toolBuildWhatsappHandoff(waSummary());
@@ -381,7 +448,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       reply,
-      products: dedupeProducts(products).slice(0, 8),
+      products: responseProducts,
       cart_actions: cartActions,
       coupon: mayOfferCoupon ? coupon : null,
       handoff_whatsapp: handoffWhatsapp,
