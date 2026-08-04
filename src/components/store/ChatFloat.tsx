@@ -24,12 +24,12 @@ type StoredChat = {
 
 const IDLE_MS = 60 * 60 * 1000; // 1h
 
-/** Pausa curta entre bolhas (não é o typewriter). */
-const BETWEEN_BUBBLES_MS = 480;
-const BEFORE_FIRST_MS = 320;
-/** ~ms por caractere no efeito de digitação. */
-const MS_PER_CHAR = 26;
-const CHAR_BATCH = 2;
+/** Delay entre bolhas conforme o tamanho (~38 caracteres/s), com limites. */
+function bubbleDelayMs(text: string): number {
+  const len = String(text || "").trim().length;
+  const ms = Math.round((len / 38) * 1000);
+  return Math.min(4200, Math.max(1100, ms));
+}
 
 interface ChatFloatProps {
   settings: StoreSettings;
@@ -117,8 +117,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  /** Texto parcial da bolha em digitação (null = nenhuma). */
-  const [streaming, setStreaming] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([
     welcomeMsg(settings.store_name),
@@ -157,35 +155,19 @@ export function ChatFloat({ settings }: ChatFloatProps) {
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, products, open, busy, showCheckout, streaming]);
+  }, [messages, products, open, busy, showCheckout]);
 
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
-  /** Animação de digitação — só UI; texto já veio completo da API. */
-  async function typeOutBubble(fullText: string) {
-    const chars = Array.from(fullText);
-    if (!chars.length) {
-      setMessages((prev) => [...prev, { role: "assistant", content: fullText }]);
-      return;
-    }
-    setStreaming("");
-    let i = 0;
-    while (i < chars.length) {
-      const step = Math.min(CHAR_BATCH, chars.length - i);
-      i += step;
-      setStreaming(chars.slice(0, i).join(""));
-      await sleep(MS_PER_CHAR * step);
-    }
-    setMessages((prev) => [...prev, { role: "assistant", content: fullText }]);
-    setStreaming(null);
-  }
-
   async function revealAssistantChunks(chunks: string[]) {
     for (let i = 0; i < chunks.length; i++) {
-      await sleep(i === 0 ? BEFORE_FIRST_MS : BETWEEN_BUBBLES_MS);
-      await typeOutBubble(chunks[i]);
+      await sleep(bubbleDelayMs(chunks[i]));
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: chunks[i] },
+      ]);
     }
   }
 
@@ -196,7 +178,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
     const nextMessages: Msg[] = [...messages, { role: "user", content }];
     setMessages(nextMessages);
     setBusy(true);
-    setStreaming(null);
     setWhatsappUrl(null);
     setShowCheckout(false);
     setProducts([]);
@@ -261,7 +242,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
         setShowCheckout(true);
       }
     } catch {
-      setStreaming(null);
       setMessages((prev) => [
         ...prev,
         {
@@ -270,7 +250,6 @@ export function ChatFloat({ settings }: ChatFloatProps) {
         },
       ]);
     } finally {
-      setStreaming(null);
       setBusy(false);
     }
   }
@@ -340,17 +319,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
               </div>
             ))}
 
-            {streaming !== null && (
-              <div className="max-w-[90%] rounded-2xl bg-white px-3 py-2 text-sm leading-relaxed text-gray-800 shadow-sm whitespace-pre-wrap">
-                <ChatText text={streaming} />
-                <span
-                  className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-[var(--color-primary)] align-middle"
-                  aria-hidden
-                />
-              </div>
-            )}
-
-            {products.length > 0 && !busy && (
+            {products.length > 0 && (
               <div className="space-y-2">
                 {products.slice(0, 4).map((p) => (
                   <div
@@ -419,7 +388,7 @@ export function ChatFloat({ settings }: ChatFloatProps) {
               </div>
             )}
 
-            {busy && streaming === null && (
+            {busy && (
               <p className="text-xs text-gray-400">Consultora digitando…</p>
             )}
             <div ref={bottomRef} />
